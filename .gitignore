@@ -1,70 +1,158 @@
-# ==============================================================================
-# 1. NODE / REACT (Frontend)
-# ==============================================================================
-node_modules/
-dist/
-dist-ssr/
-*.local
+# =============================================================================
+# HACKT RUNTIME – MASTER GITIGNORE
+# Architecture: React (Vite) + Rust (Tauri) + Python (FastAPI)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 1. SENSITIVE DATA & SECRETS (CRITICAL)
+# -----------------------------------------------------------------------------
+# Never commit API keys, tokens, or local environment configs
 .env
 .env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.production
+*.pem
+*.key
+*.cert
+src-tauri/.env
+backend_service/.env
+supabase.json
+config secrets.json
+
+# -----------------------------------------------------------------------------
+# 2. AI MODELS & KNOWLEDGE VAULT (LARGE BINARY FILES)
+# -----------------------------------------------------------------------------
+# Models are 4-10GB. Do not commit. Download via script or use Git LFS.
+models/*.gguf
+models/*.bin
+models/*.onnx
+models/*.pt
+models/*.pth
+models/indices/
+models/vault.lance/
+models/vault.graph/
+models/bm25_index.pkl
+models/file_summaries.json
+data/
+*.lance
+*.graph
+
+# -----------------------------------------------------------------------------
+# 3. FRONTEND (React + Vite + TypeScript)
+# -----------------------------------------------------------------------------
+node_modules/
+dist/
+build/
+.vite/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
 
-# ==============================================================================
-# 2. RUST / TAURI (Desktop Core)
-# ==============================================================================
+# -----------------------------------------------------------------------------
+# 4. RUST + TAURI (OS Layer)
+# -----------------------------------------------------------------------------
+# Tauri build artifacts
 src-tauri/target/
-src-tauri/binaries/*
-!src-tauri/binaries/.gitkeep
+src-tauri/binaries/
+src-tauri/*.exe
+src-tauri/*.msi
+src-tauri/*.app
+src-tauri/*.deb
+src-tauri/*.rpm
+src-tauri/app.manifest.bak
 
-# Ignore compiled sidecars (The Python .exe)
-src-tauri/binaries/*.exe
-src-tauri/binaries/*-x86_64-pc-windows-msvc.exe
+# Rust general
+**/target/
+**/*.rs.bk
+Cargo.lock
 
-# ==============================================================================
-# 3. PYTHON / AI BACKEND (Sovereign Core)
-# ==============================================================================
-__pycache__/
-*.py[cod]
-*$py.class
-.pytest_cache/
+# -----------------------------------------------------------------------------
+# 5. PYTHON BACKEND (AI Core)
+# -----------------------------------------------------------------------------
+# PyInstaller build artifacts
+backend_service/build/
+backend_service/dist/
+backend_service/*.spec
+backend_service/*.exe
+backend_service/__pycache__/
+backend_service/**/*.pyc
+backend_service/**/*.pyo
+backend_service/**/*.pyd
+
+# Virtual Environments
 venv/
+.venv/
 env/
-.env
+.env/
+ENV/
 
-# AI MODELS (DO NOT UPLOAD 10GB+ TO GIT)
-# We ignore the actual model weights. The installer will download these.
-models/
-core/models/
-*.bin
-*.onnx
-*.pt
-*.pth
-*.gguf
+# Python testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
 
-# LANCEDB / VECTOR STORE
-data/
-*.db
-*.lancedb
+# -----------------------------------------------------------------------------
+# 6. LOGS & TELEMETRY (Local Dev Only)
+# -----------------------------------------------------------------------------
+# Production logs go to %AppData%, but ignore local dev logs
+logs/
+*.log
+runtime_*.log
+audit trail/
 
-# ==============================================================================
-# 4. BUILD & DEPLOYMENT
-# ==============================================================================
-build/
-bin/
-*.spec
-_internal/
-
-# Windows specific
+# -----------------------------------------------------------------------------
+# 7. OS & EDITOR FILES
+# -----------------------------------------------------------------------------
+# Windows
 Thumbs.db
-desktop.ini
+Desktop.ini
+$RECYCLE.BIN/
+System Volume Information/
 
-# IDE Specific
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Linux
+*~
+.fuse_hidden*
+.Trash-*
+
+# IDEs
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# -----------------------------------------------------------------------------
+# 8. BUILD & INSTALLER ARTIFACTS
+# -----------------------------------------------------------------------------
+# Final installers should not be committed (use Releases tab)
+*.exe
+*.msi
+*.appimage
+*.dmg
+*.deb
+*.rpm
+*.AppImage
+bundles/
+installers/
+
+# -----------------------------------------------------------------------------
+# 9. TEMPORARY FILES
+# -----------------------------------------------------------------------------
+tmp/
+temp/
+*.tmp
+*.temp
+.cache/
