@@ -1,20 +1,50 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { useSystemStore } from '../store/systemStore';
+import { useEffect, useState, useRef, useCallback } from 'react';
+import { useSystemStore } from '../../store/systemStore';
 import { listen } from '@tauri-apps/api/event';
-import ModeToggle from './ui/ModeToggle';
-import ChatInterface from './ChatInterface';
+import ModeToggle from '../ui/ModeToggle';
+import ChatView from './ChatView';
 import { 
   Menu, Terminal, Shield, BookOpen, EyeOff, Activity, 
-  ChevronRight, Zap, AlertTriangle, CheckCircle, Lock,
-  RefreshCw, ExternalLink, Clock, TrendingUp, FileText,
-  Code, Globe, Mic, Monitor, X, Wifi, WifiOff, Server
+  ChevronRight, Zap, AlertTriangle, CheckCircle,
+  ExternalLink, Clock, FileText,
+  Code, Globe, Monitor, X, Wifi, WifiOff
 } from 'lucide-react';
 
-export default function Dashboard() {
+// ======================================================================
+// TYPE DEFINITIONS
+// ======================================================================
+interface TelemetryData {
+  scansCompleted: number;
+  threatsDetected: number;
+  lastScanTime: string;
+  activeConnections: number;
+  cpuUsage: number;
+  memoryUsage: number;
+}
+
+interface SecurityDiscovery {
+  id: string;
+  title: string;
+  severity: 'high' | 'medium' | 'low';
+  timestamp: string;
+  source: string;
+  page: number;
+}
+
+interface ActiveProject {
+  id: string;
+  title: string;
+  lastActive: string;
+  messagesCount: number;
+}
+
+// ======================================================================
+// COMPONENT
+// ======================================================================
+export default function DashboardView() {
   const { 
     isSidebarOpen, 
     toggleSidebar, 
-    setSystemVRAM, 
     vaultSkills, 
     user, 
     logout,
@@ -26,7 +56,7 @@ export default function Dashboard() {
     messages,
     initSystem,
     checkSession,
-    isProcessing
+    setSystemVRAM
   } = useSystemStore();
 
   // UI States
@@ -34,10 +64,9 @@ export default function Dashboard() {
   const [showPassiveModal, setShowPassiveModal] = useState(false);
   const [activeTab, setActiveTab] = useState<'projects' | 'security' | 'vault'>('projects');
   const [backendConnected, setBackendConnected] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   
-  // Telemetry State (From Backend WebSocket)
-  const [telemetryData, setTelemetryData] = useState({
+  // Telemetry State
+  const [telemetryData, setTelemetryData] = useState<TelemetryData>({
     scansCompleted: 0,
     threatsDetected: 0,
     lastScanTime: 'Never',
@@ -59,7 +88,6 @@ export default function Dashboard() {
         await checkSession();
         setSystemVRAM(systemVRAM);
         
-        // Simulate boot sequence
         const timer = setTimeout(() => setBootSequence(false), 800);
         return () => clearTimeout(timer);
       } catch (error) {
@@ -93,14 +121,13 @@ export default function Dashboard() {
   }, []);
 
   // ======================================================================
-  // 3. TELEMETRY WebSocket LISTENER (Production)
+  // 3. TELEMETRY LISTENER (Fixed UnlistenFn Type)
   // ======================================================================
   useEffect(() => {
     const setupTelemetry = async () => {
       try {
-        // Listen for backend telemetry events
-        const unlisten = await listen('telemetry_update', (event) => {
-          const payload = event.payload as typeof telemetryData;
+        const unlisten = await listen('telemetry_update', (event: any) => {
+          const payload = event.payload as Partial<TelemetryData>;
           setTelemetryData(prev => ({
             ...prev,
             ...payload,
@@ -109,7 +136,8 @@ export default function Dashboard() {
         });
 
         return () => {
-          unlisten.then(fn => fn());
+          // ✅ FIXED: UnlistenFn is a function, not a Promise
+          unlisten();
         };
       } catch (error) {
         console.warn('Telemetry listener setup failed:', error);
@@ -138,18 +166,26 @@ export default function Dashboard() {
   }, [mode, permissions]);
 
   // ======================================================================
-  // 4. THREAT LEVEL LISTENER
+  // 4. THREAT LEVEL LISTENER (Fixed UnlistenFn Type)
   // ======================================================================
   useEffect(() => {
-    const unlisten = listen('threat_detected', (event) => {
-      const payload = event.payload as { level: string; source?: string };
-      console.log('Threat detected:', payload);
-      // threatLevel is already managed in systemStore via the listener
-    });
+    const setupThreatListener = async () => {
+      try {
+        const unlisten = await listen('threat_detected', (event: any) => {
+          const payload = event.payload as { level: string; source?: string };
+          console.log('Threat detected:', payload);
+        });
 
-    return () => {
-      unlisten.then(fn => fn());
+        return () => {
+          // ✅ FIXED: UnlistenFn is a function, not a Promise
+          unlisten();
+        };
+      } catch (error) {
+        console.warn('Threat listener setup failed:', error);
+      }
     };
+
+    setupThreatListener();
   }, []);
 
   // ======================================================================
@@ -182,11 +218,9 @@ export default function Dashboard() {
   }, [toggleMode]);
 
   // ======================================================================
-  // 7. DYNAMIC DATA (From Backend/Store)
+  // 7. DYNAMIC DATA
   // ======================================================================
-  
-  // Security discoveries from messages with threat indicators
-  const securityDiscoveries = messages
+  const securityDiscoveries: SecurityDiscovery[] = messages
     .filter(m => m.sender === 'system' && m.text.includes('[THREAT]'))
     .slice(-5)
     .map((m, i) => ({
@@ -198,28 +232,26 @@ export default function Dashboard() {
       page: Math.floor(Math.random() * 100)
     }));
 
-  // Fallback mock data if no real threats yet
-  const displayDiscoveries = securityDiscoveries.length > 0 ? securityDiscoveries : [
+  const displayDiscoveries: SecurityDiscovery[] = securityDiscoveries.length > 0 ? securityDiscoveries : [
     { 
-      id: 1, 
+      id: '1', 
       title: 'XSS Payload Intercepted', 
-      severity: 'high' as const, 
+      severity: 'high', 
       timestamp: '2 min ago',
       source: 'vault.lance:sec-004',
       page: 12
     },
     { 
-      id: 2, 
+      id: '2', 
       title: 'Suspicious DOM Manipulation', 
-      severity: 'medium' as const, 
+      severity: 'medium', 
       timestamp: '15 min ago',
       source: 'vault.lance:sec-017',
       page: 34
     }
   ];
 
-  // Active projects from conversation history
-  const activeProjects = messages
+  const activeProjects: ActiveProject[] = messages
     .filter(m => m.sender === 'user')
     .slice(-5)
     .reverse()
@@ -231,7 +263,19 @@ export default function Dashboard() {
     }));
 
   // ======================================================================
-  // 8. RENDER
+  // 8. HELP COMMAND SUGGESTIONS
+  // ======================================================================
+  const helpSuggestions = [
+    { icon: <Shield size={12} />, text: 'Scan for vulnerabilities', command: 'Scan my code for security issues' },
+    { icon: <BookOpen size={12} />, text: 'Explain vault concepts', command: 'Explain network forensics' },
+    { icon: <Code size={12} />, text: 'Analyze current file', command: 'Analyze current file for bugs' },
+    { icon: <Globe size={12} />, text: 'Check phishing threats', command: 'Is this website safe?' },
+    { icon: <Monitor size={12} />, text: 'Screen analysis', command: 'Scan my screen for threats' },
+    { icon: <Terminal size={12} />, text: 'System status', command: 'Show system status' }
+  ];
+
+  // ======================================================================
+  // 9. RENDER
   // ======================================================================
   return (
     <div className={`relative flex h-screen w-screen bg-[#030305] text-[#e0e0e0] font-mono overflow-hidden transition-opacity duration-700 ${bootSequence ? 'opacity-0' : 'opacity-100'}`}>
@@ -649,9 +693,31 @@ export default function Dashboard() {
           </div>
         )}
 
+        {/* Help Suggestions Banner (First Time Users) */}
+        {messages.length <= 1 && (
+          <div className="w-full bg-gradient-to-r from-[#00f3ff]/5 via-[#1f1f1f]/80 to-transparent border-b border-[#00f3ff]/20 p-3 px-6 animate-in slide-in-from-top-2 duration-500">
+            <div className="flex items-center gap-2 text-[#00f3ff] mb-2">
+              <Terminal size={14} className="animate-pulse" />
+              <div className="text-xs font-bold tracking-widest uppercase">Quick Start Commands</div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {helpSuggestions.map((suggestion, i) => (
+                <button
+                  key={i}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#00f3ff]/30 text-[10px] text-[#00f3ff] hover:bg-[#00f3ff]/10 transition-all duration-300 hover:scale-105"
+                  title={suggestion.command}
+                >
+                  {suggestion.icon}
+                  <span>{suggestion.text}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Chat Interface */}
         <div className="flex-1 overflow-hidden relative">
-          <ChatInterface />
+          <ChatView />
         </div>
       </main>
     </div>

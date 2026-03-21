@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useSystemStore } from '../../store/systemStore';
 import { Zap, Activity, AlertTriangle } from 'lucide-react';
 
@@ -13,37 +13,34 @@ export default function ModeToggle() {
   const handleToggle = async () => {
     if (!hasEnoughVram || isToggling) return;
     
-    // Trigger the CSS animation
     setIsThundering(true);
     setIsToggling(true);
-    setTimeout(() => setIsThundering(false), 500);
     
     try {
-      await toggleMode(); // ✅ Await the async function
-      // Optional: Add toast notification here
-      console.log(`Mode switched to ${mode === 'active' ? 'Passive' : 'Active'}`);
+      await toggleMode();
+      setTimeout(() => setIsThundering(false), 500);
     } catch (error) {
       console.error('Mode toggle failed:', error);
-      // Optional: Show error toast to user
+      setIsThundering(false);
     } finally {
       setIsToggling(false);
     }
   };
+
+  const baseClasses = "relative flex items-center gap-2 px-4 py-1.5 rounded border transition-all duration-300 font-bold tracking-wider text-xs";
+  const colorClasses = isPassive 
+    ? "border-[#bc13fe] text-[#bc13fe] bg-[#bc13fe]/10 shadow-[0_0_15px_rgba(188,19,254,0.3)]" 
+    : "border-[#00f3ff] text-[#00f3ff] bg-[#00f3ff]/10 shadow-[0_0_15px_rgba(0,243,255,0.2)]";
+  const disabledClasses = !hasEnoughVram ? "opacity-50 cursor-not-allowed grayscale" : "hover:bg-opacity-20 hover:scale-105";
+  const loadingClasses = isToggling ? "opacity-70 cursor-wait" : "";
+  const animationClasses = isThundering ? "animate-thunder" : "";
 
   return (
     <button 
       onClick={handleToggle}
       disabled={!hasEnoughVram || isToggling}
       style={{ '--current-color': isPassive ? '#bc13fe' : '#00f3ff' } as React.CSSProperties}
-      className={`relative flex items-center gap-2 px-4 py-1.5 rounded border transition-all duration-300 ${
-        isThundering ? 'animate-thunder' : ''
-      } ${
-        isPassive 
-          ? 'border-[#bc13fe] text-[#bc13fe] bg-[#bc13fe]/10 shadow-[0_0_15px_rgba(188,19,254,0.3)]' 
-          : 'border-[#00f3ff] text-[#00f3ff] bg-[#00f3ff]/10 shadow-[0_0_15px_rgba(0,243,255,0.2)]'
-      } ${!hasEnoughVram ? 'opacity-50 cursor-not-allowed grayscale' : 'hover:bg-opacity-20 hover:scale-105'} ${
-        isToggling ? 'opacity-70 cursor-wait' : ''
-      }`}
+      className={`${baseClasses} ${colorClasses} ${disabledClasses} ${loadingClasses} ${animationClasses}`}
       aria-label={`Switch to ${isPassive ? 'Active' : 'Passive'} mode`}
       title={!hasEnoughVram ? 'Requires 6GB+ VRAM' : `Current mode: ${isPassive ? 'Passive' : 'Active'}`}
     >
@@ -54,11 +51,11 @@ export default function ModeToggle() {
       ) : (
         <Zap size={16} />
       )}
-      <span className="font-bold tracking-wider text-xs">
+      <span>
         {isToggling ? 'SWITCHING...' : isPassive ? 'PASSIVE [MONITORING]' : 'ACTIVE [CHAT ONLY]'}
       </span>
       {!hasEnoughVram && (
-        <AlertTriangle size={12} className="text-red-500" title="Insufficient VRAM" />
+        <AlertTriangle size={12} className="text-red-500" />
       )}
     </button>
   );

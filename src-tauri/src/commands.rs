@@ -13,6 +13,7 @@ pub struct ChatResponse {
 pub struct ChatRequest {
     pub prompt: String,
     pub mode: String,
+    pub session_id: String,
 }
 
 // ------------------------------------------------------------------
@@ -25,25 +26,20 @@ pub async fn get_system_vram() -> Result<u64, String> {
         use wmi::{COMLibrary, WMIConnection};
         use std::collections::HashMap;
 
-        // Safe initialization of COM library for WMI queries
         let com_con = COMLibrary::new().map_err(|e| e.to_string())?;
         let wmi_con = WMIConnection::new(com_con).map_err(|e| e.to_string())?;
         
-        // Query Dedicated Video Memory
         let results: Vec<HashMap<String, wmi::Variant>> = wmi_con
             .raw_query("SELECT AdapterRAM FROM Win32_VideoController")
             .map_err(|e| e.to_string())?;
 
         if let Some(gpu) = results.get(0) {
             if let Some(wmi::Variant::I8(ram)) = gpu.get("AdapterRAM") {
-                // Convert bytes to MB
                 let vram_mb = (*ram as u64) / (1024 * 1024);
                 return Ok(vram_mb);
             }
         }
     }
-    
-    // Fallback/Linux/Mac mock (Returns 8GB for development/fallback)
     Ok(8192)
 }
 
@@ -52,11 +48,8 @@ pub async fn get_system_vram() -> Result<u64, String> {
 // ------------------------------------------------------------------
 #[tauri::command]
 pub fn spawn_python_backend() -> Result<String, String> {
-    // TauriSidecar automatically tracks the child process.
-    // It expects the binary to be named "backend_service-x86_64-pc-windows-msvc.exe" 
-    // inside the src-tauri/binaries folder, as mapped in tauri.conf.json.
     match TauriSidecar::new_sidecar("backend_service")
-        .expect("Failed to locate backend_service sidecar binary. Did you run PyInstaller?")
+        .expect("Failed to locate backend_service sidecar binary")
         .args(["--port", "8080"])
         .spawn()
     {
@@ -68,12 +61,12 @@ pub fn spawn_python_backend() -> Result<String, String> {
 }
 
 // ------------------------------------------------------------------
-// 3. SEND CHAT TO QWEN 3.5 (Via local HTTP)
+// 3. SEND CHAT TO QWEN 3.5 (Via local HTTP - Port 8080)
 // ------------------------------------------------------------------
 #[tauri::command]
-pub async fn send_chat_message(prompt: String, mode: String) -> Result<ChatResponse, String> {
+pub async fn send_chat_message(prompt: String, mode: String, session_id: String) -> Result<ChatResponse, String> {
     let client = Client::new();
-    let payload = ChatRequest { prompt, mode };
+    let payload = ChatRequest { prompt, mode, session_id };
 
     let res = client.post("http://127.0.0.1:8080/api/chat")
         .json(&payload)
@@ -97,7 +90,6 @@ pub async fn send_chat_message(prompt: String, mode: String) -> Result<ChatRespo
 // ------------------------------------------------------------------
 #[tauri::command]
 pub async fn trigger_google_auth(window: tauri::Window) -> Result<String, String> {
-    // IMPORTANT: Replace YOUR_PROJECT_ID with your actual Supabase project ID!
     let supabase_auth_url = "https://YOUR_PROJECT_ID.supabase.co/auth/v1/authorize?provider=google&redirect_to=hackt://auth-callback";
     
     tauri::api::shell::open(
@@ -130,7 +122,7 @@ pub async fn set_monitoring_mode(mode: String) -> Result<String, String> {
 }
 
 // ------------------------------------------------------------------
-// 6. SESSION UUID GENERATOR (For SQLite Memory)
+// 6. SESSION UUID GENERATOR
 // ------------------------------------------------------------------
 #[tauri::command]
 pub fn generate_new_session() -> String {
@@ -180,13 +172,12 @@ pub async fn trigger_ide_fix_action(session_id: String, instruction: String) -> 
 }
 
 // ------------------------------------------------------------------
-// 9. CLOUD SYNC TRIGGER (Supabase History Backup)
+// 9. CLOUD SYNC TRIGGER
 // ------------------------------------------------------------------
 #[tauri::command]
 pub async fn sync_vault_to_cloud() -> Result<String, String> {
     let client = Client::new();
     
-    // Command Python to execute the Supabase delta push
     let res = client.post("http://127.0.0.1:8080/api/system/sync")
         .send()
         .await
@@ -197,4 +188,55 @@ pub async fn sync_vault_to_cloud() -> Result<String, String> {
     } else {
         Err("Failed to synchronize vault".into())
     }
+}
+
+// ------------------------------------------------------------------
+// 10. VISION & OCR CONTROLS
+// ------------------------------------------------------------------
+#[tauri::command]
+pub async fn start_vision() -> Result<String, String> {
+    let client = Client::new();
+    let res = client.post("http://127.0.0.1:8080/api/vision/start")
+        .send().await.map_err(|e| e.to_string())?;
+    if res.status().is_success() { Ok("Vision OCR Engaged".into()) } 
+    else { Err("Failed to start Vision".into()) }
+}
+
+#[tauri::command]
+pub async fn stop_vision() -> Result<String, String> {
+    let client = Client::new();
+    let res = client.post("http://127.0.0.1:8080/api/vision/stop")
+        .send().await.map_err(|e| e.to_string())?;
+    if res.status().is_success() { Ok("Vision OCR Disengaged".into()) } 
+    else { Err("Failed to stop Vision".into()) }
+}
+
+#[tauri::command]
+pub async fn trigger_screen_scan() -> Result<String, String> {
+    let client = Client::new();
+    let res = client.post("http://127.0.0.1:8080/api/vision/scan-now")
+        .send().await.map_err(|e| e.to_string())?;
+    if res.status().is_success() { Ok("Manual Screen Scan Triggered".into()) } 
+    else { Err("Scan failed".into()) }
+}
+
+// ------------------------------------------------------------------
+// 11. MICROPHONE & STT CONTROLS
+// ------------------------------------------------------------------
+#[tauri::command]
+pub async fn start_mic() -> Result<String, String> {
+    let client = Client::new();
+    let res = client.post("http://127.0.0.1:8080/api/audio/mic-start")
+        .send().await.map_err(|e| e.to_string())?;
+    if res.status().is_success() { Ok("Faster-Whisper Listening".into()) } 
+    else { Err("Failed to start Microphone".into()) }
+}
+
+#[tauri::command]
+pub async fn stop_mic() -> Result<String, String> {
+    let client = Client::new();
+    let res = client.post("http://127.0.0.1:8080/api/audio/mic-stop")
+        .send().await.map_err(|e| e.to_string())?;
+    if res.status().is_success() { Ok("Microphone Disengaged".into()) } 
+    else { Err("Failed to stop Microphone".into()) }
 }

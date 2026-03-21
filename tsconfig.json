@@ -16,6 +16,8 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
+    "noImplicitAny": true,
+    "strictNullChecks": true,
     "paths": {
       "@/*": ["./src/*"],
       "@components/*": ["./src/components/*"],

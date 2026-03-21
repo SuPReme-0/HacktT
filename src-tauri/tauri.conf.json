@@ -1,4 +1,8 @@
 {
+  "package": {
+    "productName": "HackT",
+    "version": "1.0.0"
+  },
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
@@ -31,7 +35,20 @@
       "all": false,
       "shell": {
         "all": false,
-        "open": true
+        "open": true,
+        "sidecar": true,
+        "scope": [
+          {
+            "name": "binaries/backend_service",
+            "sidecar": true
+          }
+        ]
+      },
+      "window": {
+        "all": false,
+        "show": true,
+        "hide": true,
+        "setAlwaysOnTop": true
       },
       "protocol": {
         "asset": true

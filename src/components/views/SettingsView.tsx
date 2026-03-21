@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { useSystemStore } from '../store/systemStore';
+import { useState, useEffect } from 'react';
+import { useSystemStore } from '../../store/systemStore';
 import { 
   Mic, Monitor, Code, Globe, Cloud, ShieldAlert, 
   LogOut, User as UserIcon, Lock, RefreshCw, 

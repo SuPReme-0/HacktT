@@ -1,8 +1,5 @@
-import React, { useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 
-// ======================================================================
-// TYPE DEFINITIONS
-// ======================================================================
 interface Star {
   x: number;
   y: number;
@@ -21,9 +18,6 @@ interface StarfieldProps {
   mode?: 'active' | 'passive';
 }
 
-// ======================================================================
-// COMPONENT
-// ======================================================================
 export default function Starfield({ 
   opacity = 0.4, 
   threatLevel = 'safe',
@@ -32,6 +26,11 @@ export default function Starfield({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const starsRef = useRef<Star[]>([]);
   const animationFrameRef = useRef<number>(0);
+  const propsRef = useRef({ opacity, threatLevel, mode });
+
+  useEffect(() => {
+    propsRef.current = { opacity, threatLevel, mode };
+  }, [opacity, threatLevel, mode]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -40,9 +39,6 @@ export default function Starfield({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // ==================================================================
-    // DPI/RETINA SUPPORT (Critical for 4K displays)
-    // ==================================================================
     const dpr = window.devicePixelRatio || 1;
     let width = window.innerWidth;
     let height = window.innerHeight;
@@ -53,14 +49,8 @@ export default function Starfield({
     canvas.style.height = `${height}px`;
     ctx.scale(dpr, dpr);
 
-    // ==================================================================
-    // MOUSE TRACKING
-    // ==================================================================
     let mouse = { x: width / 2, y: height / 2 };
 
-    // ==================================================================
-    // STAR GENERATION WITH VARIATION
-    // ==================================================================
     const stars: Star[] = [];
     const colorVariants: Star['colorVariant'][] = ['cyan', 'cyan', 'cyan', 'purple', 'white'];
     
@@ -80,19 +70,16 @@ export default function Starfield({
     }
     starsRef.current = stars;
 
-    // ==================================================================
-    // COLOR MAPPING (CSS Variables for consistency)
-    // ==================================================================
     const getStarColor = (variant: Star['colorVariant'], currentOpacity: number) => {
-      // Threat level affects overall color temperature
-      if (threatLevel === 'high') {
-        return `rgba(255, 0, 60, ${currentOpacity})`; // Red for danger
+      const { threatLevel: currentThreat } = propsRef.current;
+      
+      if (currentThreat === 'high') {
+        return `rgba(255, 0, 60, ${currentOpacity})`;
       }
-      if (threatLevel === 'medium') {
-        return `rgba(255, 176, 0, ${currentOpacity})`; // Yellow for warning
+      if (currentThreat === 'medium') {
+        return `rgba(255, 176, 0, ${currentOpacity})`;
       }
       
-      // Normal mode colors
       switch (variant) {
         case 'cyan':
           return `rgba(0, 243, 255, ${currentOpacity})`;
@@ -105,47 +92,37 @@ export default function Starfield({
       }
     };
 
-    // ==================================================================
-    // RENDER LOOP
-    // ==================================================================
     let time = 0;
     const render = () => {
       ctx.clearRect(0, 0, width, height);
-      time += 0.016; // Approx 60fps
+      time += 0.016;
 
       starsRef.current.forEach((star) => {
-        // Twinkle effect
+        const { opacity: currentOpacity } = propsRef.current;
         const twinkle = Math.sin(time * star.twinkleSpeed * 100 + star.x) * 0.2 + 0.8;
-        const currentOpacity = opacity * star.baseOpacity * twinkle;
+        const finalOpacity = currentOpacity * star.baseOpacity * twinkle;
 
-        // Parallax Movement
         star.x += star.vx;
         star.y += star.vy;
 
-        // ==================================================================
-        // PERFORMANCE OPTIMIZATION: Distance Squared (no Math.sqrt)
-        // ==================================================================
         const dx = mouse.x - star.x;
         const dy = mouse.y - star.y;
         const distanceSquared = dx * dx + dy * dy;
         
-        // 100px radius = 10000 squared
         if (distanceSquared < 10000) {
           const force = 0.01 * (1 - distanceSquared / 10000);
           star.x -= dx * force;
           star.y -= dy * force;
         }
 
-        // Screen wrap
         if (star.x < 0) star.x = width;
         if (star.x > width) star.x = 0;
         if (star.y < 0) star.y = height;
         if (star.y > height) star.y = 0;
 
-        // Draw
         ctx.beginPath();
         ctx.arc(star.x, star.y, star.radius, 0, Math.PI * 2);
-        ctx.fillStyle = getStarColor(star.colorVariant, currentOpacity);
+        ctx.fillStyle = getStarColor(star.colorVariant, finalOpacity);
         ctx.fill();
       });
 
@@ -154,9 +131,6 @@ export default function Starfield({
     
     render();
 
-    // ==================================================================
-    // EVENT HANDLERS
-    // ==================================================================
     const handleResize = () => {
       width = window.innerWidth;
       height = window.innerHeight;
@@ -175,20 +149,17 @@ export default function Starfield({
     window.addEventListener('resize', handleResize);
     window.addEventListener('mousemove', handleMouseMove);
 
-    // ==================================================================
-    // CLEANUP (Prevent Memory Leaks)
-    // ==================================================================
     return () => {
       window.removeEventListener('resize', handleResize);
       window.removeEventListener('mousemove', handleMouseMove);
       cancelAnimationFrame(animationFrameRef.current);
     };
-  }, [opacity, threatLevel, mode]);
+  }, []);
 
   return (
     <canvas
       ref={canvasRef}
-      className="fixed inset-0 pointer-events-none z-0 mix-blend-screen"
+      className="fixed inset-0 pointer-events-none z-0"
       aria-hidden="true"
       role="presentation"
     />

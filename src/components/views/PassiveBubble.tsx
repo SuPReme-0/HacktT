@@ -1,25 +1,60 @@
-import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
-import { invoke, listen } from '@tauri-apps/api/tauri';
-import { getCurrentWindow, appWindow } from '@tauri-apps/api/window';
-import { useSystemStore } from '../store/systemStore';
+import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
+import { invoke } from '@tauri-apps/api/tauri';
+import { listen } from '@tauri-apps/api/event';
+import { appWindow } from '@tauri-apps/api/window';
+import { useSystemStore } from '../../store/systemStore';
 import { 
   Shield, ShieldAlert, Mic, Volume2, Code, 
-  Eye, Zap, Activity, Wifi, WifiOff, Settings,
+  Eye, Zap, Activity, WifiOff,
   X, Check, AlertTriangle, Cpu, RefreshCw,
-  Terminal, Globe, LogOut, Maximize2
+  Globe, LogOut, Maximize2
 } from 'lucide-react';
 
+// ======================================================================
+// TYPE DEFINITIONS
+// ======================================================================
+interface BackendHealth {
+  cpuUsage: number;
+  memoryUsage: number;
+  activeScans: number;
+}
+
+interface ThreatPayload {
+  level: string;
+  source?: string;
+}
+
+interface STTPayload {
+  text: string;
+}
+
+interface BubbleWSPayload {
+  type: 'tts' | 'threat' | 'telemetry';
+  is_speaking?: boolean;
+  volume?: number;
+  level?: string;
+  source?: string;
+  cpu_usage?: number;
+  memory_usage?: number;
+  active_scans?: number;
+}
+
+// ======================================================================
+// COMPONENT
+// ======================================================================
 export default function PassiveBubble() {
+  // ✅ REMOVED isSpeaking from store - Bubble manages its own audio state
   const { 
     isProcessing, 
-    isSpeaking, 
     mode, 
     threatLevel, 
     systemVRAM,
     permissions,
     togglePermission,
     user,
-    logout
+    logout,
+    backendConnected,
+    setBackendConnected
   } = useSystemStore();
   
   // UI States
@@ -28,17 +63,25 @@ export default function PassiveBubble() {
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'reconnecting'>('connected');
   const [particleCount, setParticleCount] = useState(8);
   const [isDragging, setIsDragging] = useState(false);
-  const [backendHealth, setBackendHealth] = useState<{
-    cpuUsage: number;
-    memoryUsage: number;
-    activeScans: number;
-  }>({ cpuUsage: 0, memoryUsage: 0, activeScans: 0 });
+  const [isThundering, setIsThundering] = useState(false);
+  
+  // ✅ NEW: Local audio reactivity state
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [audioLevel, setAudioLevel] = useState(1); // 1 = baseline, 1.0-1.5 = reactive scale
+  
+  const [backendHealth, setBackendHealth] = useState<BackendHealth>({ 
+    cpuUsage: 0, 
+    memoryUsage: 0, 
+    activeScans: 0 
+  });
   
   // Refs
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
   const healthCheckInterval = useRef<NodeJS.Timeout | null>(null);
   const threatListener = useRef<(() => void) | null>(null);
+  const sttListener = useRef<(() => void) | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
   // If we are in Active mode, the bubble hides so the Dashboard can take over
   if (mode !== 'passive') return null;
@@ -48,7 +91,8 @@ export default function PassiveBubble() {
   // ======================================================================
   const checkConnection = useCallback(async () => {
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/health', { 
+      // ✅ FIXED: Port 8000 → 8080
+      const response = await fetch('http://127.0.0.1:8080/api/health', { 
         method: 'GET',
         signal: AbortSignal.timeout(2000)
       });
@@ -56,6 +100,7 @@ export default function PassiveBubble() {
       if (response.ok) {
         const health = await response.json();
         setConnectionStatus('connected');
+        setBackendConnected(true);
         setBackendHealth({
           cpuUsage: health.cpu_usage || 0,
           memoryUsage: health.memory_usage || 0,
@@ -63,11 +108,13 @@ export default function PassiveBubble() {
         });
       } else {
         setConnectionStatus('reconnecting');
+        setBackendConnected(false);
       }
     } catch {
       setConnectionStatus('disconnected');
+      setBackendConnected(false);
     }
-  }, []);
+  }, [setBackendConnected]);
 
   useEffect(() => {
     checkConnection();
@@ -80,23 +127,91 @@ export default function PassiveBubble() {
   }, [checkConnection]);
 
   // ======================================================================
-  // 2. LISTEN FOR THREAT ALERTS FROM BACKEND
+  // 2. SOVEREIGN WEBSOCKET (Audio Reactivity & Telemetry)
+  // ======================================================================
+  useEffect(() => {
+    let reconnectTimer: NodeJS.Timeout;
+
+    const connectWS = () => {
+      // ✅ Direct WebSocket to Python - independent of Dashboard
+      wsRef.current = new WebSocket('ws://127.0.0.1:8080/ws/bubble');
+
+      wsRef.current.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data) as BubbleWSPayload;
+          
+          // Audio Reactivity Payload from Python TTS
+          if (data.type === 'tts') {
+            setIsSpeaking(data.is_speaking || false);
+            // Python sends volume multiplier (e.g., 1.0 to 1.5)
+            setAudioLevel(data.is_speaking ? (data.volume || 1.2) : 1); 
+          }
+          // Threat updates (optional fallback if Tauri events fail)
+          else if (data.type === 'threat' && data.level) {
+            if (data.level === 'high') {
+              setIsThundering(true);
+              setParticleCount(16);
+              setTimeout(() => {
+                setIsThundering(false);
+                setParticleCount(8);
+              }, 3000);
+            }
+          }
+          // Telemetry updates
+          else if (data.type === 'telemetry') {
+            setBackendHealth({
+              cpuUsage: data.cpu_usage || 0,
+              memoryUsage: data.memory_usage || 0,
+              activeScans: data.active_scans || 0
+            });
+          }
+        } catch (err) {
+          console.warn("Bubble WS Parse Error:", err);
+        }
+      };
+
+      wsRef.current.onclose = () => {
+        // Auto-reconnect if Python restarts
+        reconnectTimer = setTimeout(connectWS, 3000);
+      };
+
+      wsRef.current.onerror = (err) => {
+        console.warn("Bubble WS Error:", err);
+      };
+    };
+
+    connectWS();
+
+    return () => {
+      if (wsRef.current) wsRef.current.close();
+      clearTimeout(reconnectTimer);
+    };
+  }, []);
+
+  // ======================================================================
+  // 3. LISTEN FOR THREAT ALERTS FROM BACKEND (Tauri Fallback)
   // ======================================================================
   useEffect(() => {
     const setupThreatListener = async () => {
       try {
-        threatListener.current = await listen('threat_detected', (event) => {
-          const payload = event.payload as { level: string; source?: string };
+        const unlisten = await listen('threat_detected', (event: any) => {
+          const payload = event.payload as ThreatPayload;
           
           // Visual feedback on threat
           if (payload.level === 'high') {
+            setIsThundering(true);
             setParticleCount(16);
-            setTimeout(() => setParticleCount(8), 3000);
+            setTimeout(() => {
+              setIsThundering(false);
+              setParticleCount(8);
+            }, 3000);
           } else if (payload.level === 'medium') {
             setParticleCount(12);
             setTimeout(() => setParticleCount(8), 2000);
           }
         });
+        
+        threatListener.current = unlisten;
       } catch (error) {
         console.warn('Threat listener setup failed:', error);
       }
@@ -112,30 +227,36 @@ export default function PassiveBubble() {
   }, []);
 
   // ======================================================================
-  // 3. LISTEN FOR STT RESULTS (Voice Commands)
+  // 4. LISTEN FOR STT RESULTS (Voice Commands - Tauri Fallback)
   // ======================================================================
   useEffect(() => {
     const setupSTTListener = async () => {
       try {
-        const unlisten = await listen('stt_result', (event) => {
-          const payload = event.payload as { text: string };
+        const unlisten = await listen('stt_result', (event: any) => {
+          const payload = event.payload as STTPayload;
           console.log('Voice command received:', payload.text);
-          // Handle voice command
+          // Visual feedback for voice input
+          setIsThundering(true);
+          setTimeout(() => setIsThundering(false), 500);
         });
-
-        return () => {
-          unlisten.then(fn => fn());
-        };
+        
+        sttListener.current = unlisten;
       } catch (error) {
         console.warn('STT listener setup failed:', error);
       }
     };
 
     setupSTTListener();
+
+    return () => {
+      if (sttListener.current) {
+        sttListener.current();
+      }
+    };
   }, []);
 
   // ======================================================================
-  // 4. CLOSE CONTEXT MENU ON CLICK OUTSIDE
+  // 5. CLOSE CONTEXT MENU ON CLICK OUTSIDE
   // ======================================================================
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -149,12 +270,12 @@ export default function PassiveBubble() {
   }, []);
 
   // ======================================================================
-  // 5. WINDOW DRAG FUNCTIONALITY (Tauri API)
+  // 6. WINDOW DRAG FUNCTIONALITY (Tauri API)
   // ======================================================================
   const handleDragStart = useCallback(async () => {
     setIsDragging(true);
     try {
-      await getCurrentWindow().startDragging();
+      await appWindow.startDragging();
     } catch (error) {
       console.warn('Drag failed:', error);
     } finally {
@@ -163,7 +284,7 @@ export default function PassiveBubble() {
   }, []);
 
   // ======================================================================
-  // 6. DYNAMIC STATE LOGIC (Color, Text & HUD Mapping)
+  // 7. DYNAMIC STATE LOGIC (Color, Text & HUD Mapping)
   // ======================================================================
   const visualState = useMemo(() => {
     // Default: Safe Monitoring (Cyan / Deep Blue)
@@ -174,20 +295,23 @@ export default function PassiveBubble() {
     let isAlert = false;
     let pulseSpeed = '3s';
     let icon = <Shield size={20} className="text-white/80" />;
+    let glowIntensity = 0.6; 
 
     // Connection Status Override
-    if (connectionStatus === 'disconnected') {
+    if (!backendConnected || connectionStatus === 'disconnected') {
       coreColor = 'bg-gradient-to-br from-[#4a4a4a] to-[#2a2a2a] shadow-[0_0_15px_rgba(100,100,100,0.4)]';
       ringColor = 'border-gray-600 opacity-40';
       statusText = 'OFFLINE';
       hudAnimation = 'animate-pulse';
       icon = <WifiOff size={20} className="text-gray-400" />;
+      glowIntensity = 0.4;
     } else if (connectionStatus === 'reconnecting') {
       coreColor = 'bg-gradient-to-br from-[#ffb000] to-[#cc5500] shadow-[0_0_20px_rgba(255,176,0,0.5)]';
       ringColor = 'border-[#ffb000] opacity-60';
       statusText = 'RECONNECTING...';
       hudAnimation = 'animate-ping';
       icon = <RefreshCw size={20} className="text-white animate-spin" />;
+      glowIntensity = 0.5;
     }
     // Threat Overrides (Yellow / Red)
     else if (threatLevel === 'high') {
@@ -198,6 +322,7 @@ export default function PassiveBubble() {
       isAlert = true;
       pulseSpeed = '0.5s';
       icon = <ShieldAlert size={20} className="text-white drop-shadow-lg" />;
+      glowIntensity = 0.8;
     } else if (threatLevel === 'medium') {
       coreColor = 'bg-gradient-to-br from-[#ffb000] to-[#cc5500] shadow-[0_0_30px_rgba(255,176,0,0.7)]';
       ringColor = 'border-[#ffb000] opacity-70 scale-105';
@@ -206,6 +331,7 @@ export default function PassiveBubble() {
       isAlert = true;
       pulseSpeed = '1.5s';
       icon = <AlertTriangle size={20} className="text-white" />;
+      glowIntensity = 0.7;
     }
 
     // Action Overrides (Processing / Speaking)
@@ -216,6 +342,7 @@ export default function PassiveBubble() {
       statusText = 'ANALYZING...';
       pulseSpeed = '0.3s';
       icon = <Activity size={20} className="text-[#0a0a0a] animate-pulse" />;
+      glowIntensity = 0.9;
     } else if (isSpeaking) {
       coreColor = 'bg-gradient-to-br from-[#bc13fe] to-[#5e00b3] shadow-[0_0_30px_rgba(188,19,254,0.7)]';
       ringColor = 'border-[#bc13fe] opacity-80 scale-125';
@@ -223,21 +350,37 @@ export default function PassiveBubble() {
       statusText = 'TRANSMITTING';
       pulseSpeed = '0.8s';
       icon = <Volume2 size={20} className="text-white" />;
+      glowIntensity = 0.7;
     }
 
-    return { coreColor, ringColor, hudAnimation, statusText, isAlert, pulseSpeed, icon };
-  }, [isProcessing, isSpeaking, threatLevel, connectionStatus]);
+    // Thunder Effect Override (User Interaction)
+    if (isThundering) {
+      coreColor = 'bg-gradient-to-br from-[#00f3ff] to-[#bc13fe] shadow-[0_0_50px_rgba(0,243,255,1)] animate-thunder';
+      ringColor = 'border-[#00f3ff] opacity-100 scale-125 border-dashed';
+      hudAnimation = 'animate-spin-fast';
+      statusText = 'PROCESSING...';
+      pulseSpeed = '0.2s';
+      icon = <Zap size={20} className="text-white animate-pulse" />;
+      glowIntensity = 1;
+    }
+
+    return { coreColor, ringColor, hudAnimation, statusText, isAlert, pulseSpeed, icon, glowIntensity };
+  }, [isProcessing, isSpeaking, threatLevel, connectionStatus, backendConnected, isThundering]);
 
   // ======================================================================
-  // 7. INTERACTION HANDLERS
+  // 8. INTERACTION HANDLERS
   // ======================================================================
   const handleBubbleClick = useCallback(async (e: React.MouseEvent) => {
     if (isProcessing || isSpeaking) return;
     if (e.button === 2) return; // Right-click handled separately
 
-    // Tactile animation trigger
+    // Thunder animation trigger
+    setIsThundering(true);
     setIsClicked(true);
-    setTimeout(() => setIsClicked(false), 150);
+    setTimeout(() => {
+      setIsThundering(false);
+      setIsClicked(false);
+    }, 500);
 
     try {
       if (visualState.isAlert) {
@@ -262,6 +405,9 @@ export default function PassiveBubble() {
 
   const handleQuickAction = useCallback(async (action: string) => {
     setShowContextMenu(false);
+    setIsThundering(true);
+    setTimeout(() => setIsThundering(false), 500);
+    
     try {
       switch (action) {
         case 'toggle-vision':
@@ -293,7 +439,7 @@ export default function PassiveBubble() {
   }, [togglePermission, logout]);
 
   // ======================================================================
-  // 8. PARTICLE RENDERER (Orbital Effects)
+  // 9. PARTICLE RENDERER (Orbital Effects)
   // ======================================================================
   const renderParticles = useMemo(() => {
     return Array.from({ length: particleCount }).map((_, i) => {
@@ -306,8 +452,12 @@ export default function PassiveBubble() {
       return (
         <div
           key={i}
-          className={`absolute w-1 h-1 rounded-full ${
-            visualState.isAlert ? 'bg-[#ff003c]' : 'bg-[#00f3ff]'
+          className={`absolute w-1.5 h-1.5 rounded-full ${
+            visualState.isAlert 
+              ? 'bg-[#ff003c] shadow-[0_0_10px_#ff003c]' 
+              : isThundering
+              ? 'bg-[#00f3ff] shadow-[0_0_15px_#00f3ff]'
+              : 'bg-[#00f3ff] shadow-[0_0_8px_#00f3ff]'
           } animate-ping`}
           style={{
             left: `calc(50% + ${x}px)`,
@@ -319,10 +469,10 @@ export default function PassiveBubble() {
         />
       );
     });
-  }, [particleCount, visualState.isAlert]);
+  }, [particleCount, visualState.isAlert, isThundering]);
 
   // ======================================================================
-  // 9. VRAM TELEMETRY BADGE
+  // 10. VRAM TELEMETRY BADGE
   // ======================================================================
   const vramBadge = useMemo(() => {
     if (systemVRAM === 0) return { text: 'N/A', color: 'text-gray-500' };
@@ -332,15 +482,23 @@ export default function PassiveBubble() {
   }, [systemVRAM]);
 
   // ======================================================================
-  // 10. RENDER
+  // 11. RENDER
   // ======================================================================
   return (
     <div 
-      className="fixed inset-0 w-full h-full flex items-center justify-center z-50 overflow-hidden"
+      className="fixed inset-0 w-full h-full flex items-center justify-center z-50 overflow-hidden bg-transparent"
       onPointerDown={handleDragStart}
       role="application"
       aria-label="HackT Passive Monitor Bubble"
     >
+      {/* ==================== THUNDER EFFECT OVERLAY ==================== */}
+      {isThundering && (
+        <div className="absolute inset-0 pointer-events-none z-40">
+          <div className="absolute inset-0 bg-gradient-to-br from-[#00f3ff]/10 to-[#bc13fe]/10 animate-pulse" />
+          <div className="absolute inset-0 border-4 border-[#00f3ff]/20 rounded-full animate-ping" />
+        </div>
+      )}
+
       {/* ==================== CONTEXT MENU ==================== */}
       {showContextMenu && (
         <div 
@@ -529,9 +687,15 @@ export default function PassiveBubble() {
           aria-label={`Backend connection: ${connectionStatus}`}
         />
 
-        {/* The Core Neural Orb */}
+        {/* The Core Neural Orb - ✅ FINAL UPGRADE: Audio-Reactive Scaling */}
         <div 
-          className={`relative w-16 h-16 rounded-full transition-all duration-500 overflow-hidden pointer-events-none ${visualState.coreColor}`}
+          className={`relative w-16 h-16 rounded-full transition-all duration-75 overflow-hidden pointer-events-none ${visualState.coreColor}`}
+          style={{ 
+            // Maintain dynamic glow intensity
+            filter: `drop-shadow(0 0 ${visualState.glowIntensity * 20}px currentColor)`,
+            // ✅ REAL-TIME AUDIO REACTIVITY: Scale with voice volume
+            transform: `scale(${isSpeaking ? audioLevel : 1})`
+          }}
           aria-hidden="true"
         >
           {/* Internal Plasma/Glass Effect */}

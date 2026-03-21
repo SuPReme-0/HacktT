@@ -1,15 +1,18 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { useSystemStore } from '../store/systemStore';
+import { useState, useRef, useEffect } from 'react';
+import { useSystemStore } from '../../store/systemStore';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { 
   Send, Terminal, Cpu, Zap, Mic, Volume2, VolumeX, 
   Code, Activity, Sparkles, History, Lightbulb, 
-  RefreshCw, CheckCircle, AlertCircle, Copy, ThumbsUp, ThumbsDown
+  RefreshCw, AlertCircle, Copy, ThumbsUp, ThumbsDown,
+  CheckCircle, X, Keyboard
 } from 'lucide-react';
 
-// Suggestion types for smart recommendations
+// ======================================================================
+// TYPE DEFINITIONS
+// ======================================================================
 interface Suggestion {
   id: string;
   type: 'ide' | 'history' | 'context' | 'quick';
@@ -18,14 +21,19 @@ interface Suggestion {
   priority: number;
 }
 
-export default function ChatInterface() {
+// ======================================================================
+// COMPONENT
+// ======================================================================
+export default function ChatView() {
   const { 
     messages, 
     sendMessage, 
     mode, 
     isProcessing, 
     permissions,
-    vaultSkills 
+    vaultSkills,
+    activeContext,
+    backendConnected,
   } = useSystemStore();
   
   // Local States
@@ -34,16 +42,10 @@ export default function ChatInterface() {
   const [isRecording, setIsRecording] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
-  const [typedMessage, setTypedMessage] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(true);
-  
-  // Telemetry from backend (will be populated from store in production)
-  const [activeContext, setActiveContext] = useState<{
-    file?: string;
-    language?: string;
-    lastModified?: string;
-    recentChanges?: string[];
-  }>({});
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [charCount, setCharCount] = useState(0);
+  const MAX_CHARS = 1000;
 
   const endOfMessagesRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -57,7 +59,14 @@ export default function ChatInterface() {
   }, [messages]);
 
   // ======================================================================
-  // 2. GENERATE SMART SUGGESTIONS
+  // 2. UPDATE CHAR COUNT
+  // ======================================================================
+  useEffect(() => {
+    setCharCount(input.length);
+  }, [input]);
+
+  // ======================================================================
+  // 3. GENERATE SMART SUGGESTIONS
   // ======================================================================
   useEffect(() => {
     const generateSuggestions = () => {
@@ -82,8 +91,9 @@ export default function ChatInterface() {
       }
 
       // Recent History Suggestions
-      if (messages.length > 2) {
-        const lastUserMessage = messages.filter(m => m.sender === 'user').slice(-1)[0];
+      const userMessages = messages.filter(m => m.sender === 'user');
+      if (userMessages.length > 0) {
+        const lastUserMessage = userMessages.slice(-1)[0];
         if (lastUserMessage) {
           newSuggestions.push({
             id: 'hist-1',
@@ -128,37 +138,50 @@ export default function ChatInterface() {
       setSuggestions(newSuggestions.sort((a, b) => a.priority - b.priority).slice(0, 4));
     };
 
-    generateSuggestions();
-  }, [mode, permissions.ideIntegration, activeContext, messages, vaultSkills]);
+    if (!isProcessing && showSuggestions) {
+      generateSuggestions();
+    }
+  }, [mode, permissions.ideIntegration, activeContext, messages, vaultSkills, isProcessing, showSuggestions]);
 
   // ======================================================================
-  // 3. TYPING ANIMATION FOR AI RESPONSES
+  // 4. KEYBOARD SHORTCUTS
   // ======================================================================
-  const typeMessage = useCallback((fullText: string, speed: number = 10) => {
-    let currentIndex = 0;
-    setTypedMessage('');
-    
-    const typeInterval = setInterval(() => {
-      if (currentIndex < fullText.length) {
-        setTypedMessage(prev => prev + fullText[currentIndex]);
-        currentIndex++;
-      } else {
-        clearInterval(typeInterval);
-        setTypedMessage(fullText);
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+K to focus input
+      if (e.ctrlKey && e.key === 'k') {
+        e.preventDefault();
+        inputRef.current?.focus();
       }
-    }, speed);
+      // Ctrl+Enter to send
+      if (e.ctrlKey && e.key === 'Enter') {
+        e.preventDefault();
+        if (input.trim() && !isProcessing) {
+          handleSend();
+        }
+      }
+      // Escape to clear input
+      if (e.key === 'Escape' && document.activeElement === inputRef.current) {
+        setInput('');
+        setShowSuggestions(true);
+      }
+    };
 
-    return () => clearInterval(typeInterval);
-  }, []);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [input, isProcessing]);
 
   // ======================================================================
-  // 4. SEND MESSAGE HANDLER
+  // 5. SEND MESSAGE HANDLER
   // ======================================================================
-  const handleSend = async (e?: React.FormEvent, overrideText?: string) => {
-    e?.preventDefault();
+  const handleSend = async (overrideText?: string) => {
     const textToSend = overrideText || input;
     
-    if (!textToSend.trim() || isProcessing) return;
+    if (!textToSend.trim() || isProcessing || !backendConnected) return;
+    if (textToSend.length > MAX_CHARS) {
+      alert(`Message exceeds ${MAX_CHARS} character limit`);
+      return;
+    }
 
     // Thunder animation
     setIsThundering(true);
@@ -169,50 +192,76 @@ export default function ChatInterface() {
     setShowSuggestions(false);
 
     // Send to backend
-    await sendMessage(textToSend);
+    try {
+      await sendMessage(textToSend);
+    } catch (error: any) {
+      console.error('Send failed:', error);
+    }
     
     // Refocus input
     setTimeout(() => inputRef.current?.focus(), 100);
   };
 
   // ======================================================================
-  // 5. STT (Speech-to-Text) Handler
+  // 6. STT (Speech-to-Text) Handler
   // ======================================================================
   const toggleRecording = async () => {
+    if (!permissions.micEnabled) {
+      alert('Microphone permission not enabled. Enable in Settings.');
+      return;
+    }
+
+    
     if (!isRecording) {
-      // In production, this would trigger Tauri invoke for Faster-Whisper
       setIsRecording(true);
-      setInput('');
-      
-      // Simulate listening timeout (replace with actual STT callback)
-      setTimeout(() => {
+      try {
+        // Talk directly to Python for the STT!
+        const res = await fetch('http://127.0.0.1:8080/api/audio/transcribe', { method: 'POST' });
+        const data = await res.json();
+        setInput(data.text);
+      } catch (err) {
+        console.error("STT Failed", err);
+      } finally {
         setIsRecording(false);
-        // In production: const transcribed = await invoke('get_stt_result');
-        // setInput(transcribed);
-      }, 5000);
-    } else {
-      setIsRecording(false);
+      }
     }
   };
 
   // ======================================================================
-  // 6. COPY MESSAGE TO CLIPBOARD
+  // 7. COPY MESSAGE TO CLIPBOARD
   // ======================================================================
-  const copyToClipboard = async (text: string) => {
-    await navigator.clipboard.writeText(text);
-    // Show toast notification (implement in production)
+  const copyToClipboard = async (text: string, messageId: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedMessageId(messageId);
+      setTimeout(() => setCopiedMessageId(null), 2000);
+    } catch (error) {
+      console.error('Copy failed:', error);
+    }
   };
 
   // ======================================================================
-  // 7. MESSAGE FEEDBACK (Thumbs Up/Down)
+  // 8. MESSAGE FEEDBACK (Thumbs Up/Down)
   // ======================================================================
   const handleFeedback = async (messageId: string, feedback: 'up' | 'down') => {
     // In production, send feedback to backend for model improvement
     console.log(`Feedback for ${messageId}: ${feedback}`);
+    await fetch('http://127.0.0.1:8080/api/chat/feedback', {
+    method: 'POST',
+    body: JSON.stringify({ messageId, feedback })
+});
+  };
+
+  // ======================================================================
+  // 9. TOGGLE TTS
+  // ======================================================================
+  const toggleTTS = () => {
+    setIsMuted(!isMuted);
   };
 
   const isTyping = input.length > 0;
   const isPassive = mode === 'passive';
+  const canSend = input.trim() && !isProcessing && !isRecording && backendConnected;
 
   return (
     <div className="h-full flex flex-col p-4 relative z-10 overflow-hidden">
@@ -220,24 +269,33 @@ export default function ChatInterface() {
       {/* ==================== HEADER: System Status & TTS ==================== */}
       <div className="flex justify-between items-center mb-6 px-2">
         <div className="flex items-center gap-3">
-          <div className="text-[10px] text-gray-500 uppercase tracking-widest border border-[#1f1f1f] rounded-full px-4 py-1.5 bg-black/40 backdrop-blur-sm flex items-center gap-2 shadow-lg">
+          <div className={`text-[10px] uppercase tracking-widest border rounded-full px-4 py-1.5 bg-black/40 backdrop-blur-sm flex items-center gap-2 shadow-lg ${
+            backendConnected 
+              ? 'border-[#1f1f1f] text-gray-400' 
+              : 'border-red-500/30 text-red-400'
+          }`}>
             <Cpu size={12} className={isPassive ? 'text-[#bc13fe]' : 'text-[#00f3ff]'} />
-            Qwen 3.5 Engine {isPassive ? '(PASSIVE)' : '(ACTIVE)'}
+            Qwen 3.5 {isPassive ? '(PASSIVE)' : '(ACTIVE)'}
           </div>
           
           {/* Connection Status */}
-          <div className="flex items-center gap-1.5 text-[9px] text-gray-600 uppercase tracking-widest">
+          <div className={`flex items-center gap-1.5 text-[9px] uppercase tracking-widest ${
+            backendConnected ? 'text-gray-600' : 'text-red-400'
+          }`}>
             <div className={`h-1.5 w-1.5 rounded-full ${
-              isProcessing ? 'bg-yellow-500 animate-pulse' : 'bg-green-500'
+              backendConnected
+                ? isProcessing ? 'bg-yellow-500 animate-pulse' : 'bg-green-500'
+                : 'bg-red-500 animate-pulse'
             }`} />
-            {isProcessing ? 'Processing' : 'Online'}
+            {backendConnected ? (isProcessing ? 'Processing' : 'Online') : 'Offline'}
           </div>
         </div>
         
         {/* TTS Toggle */}
         <button 
-          onClick={() => setIsMuted(!isMuted)}
-          className={`p-2 rounded-full border transition-all duration-300 ${
+          onClick={toggleTTS}
+          disabled={!backendConnected}
+          className={`p-2 rounded-full border transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed ${
             isMuted 
               ? 'border-gray-700 text-gray-600 hover:bg-white/5' 
               : 'border-[#00f3ff]/30 text-[#00f3ff] bg-[#00f3ff]/10 shadow-[0_0_10px_rgba(0,243,255,0.2)]'
@@ -248,13 +306,21 @@ export default function ChatInterface() {
         </button>
       </div>
 
+      {/* ==================== OFFLINE WARNING ==================== */}
+      {!backendConnected && (
+        <div className="mx-2 mb-4 p-3 rounded-lg border border-red-500/30 bg-red-900/20 flex items-center gap-2 text-red-400 text-xs animate-in slide-in-from-top-2">
+          <AlertCircle size={14} />
+          <span>AI Core Offline. Check Python backend connection.</span>
+        </div>
+      )}
+
       {/* ==================== MESSAGE HISTORY VIEWPORT ==================== */}
       <div 
         ref={messagesContainerRef}
         className="flex-1 overflow-y-auto gloomy-scroll p-4 space-y-6"
       >
         {/* Welcome Banner (Only on first message) */}
-        {messages.length === 1 && (
+        {messages.length <= 1 && (
           <div className="flex justify-center mb-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
             <div className="text-center max-w-lg">
               <div className="text-[10px] text-gray-500 uppercase tracking-widest border border-[#1f1f1f] rounded-full px-4 py-1.5 bg-black/40 backdrop-blur-sm flex items-center gap-2 shadow-lg mb-4">
@@ -268,6 +334,14 @@ export default function ChatInterface() {
                 Your local AI security agent is ready. Ask about code vulnerabilities, 
                 security best practices, or request screen analysis.
               </p>
+              <div className="mt-4 flex items-center justify-center gap-4 text-[9px] text-gray-600">
+                <span className="flex items-center gap-1">
+                  <Keyboard size={10} /> Ctrl+K to focus
+                </span>
+                <span className="flex items-center gap-1">
+                  <Keyboard size={10} /> Ctrl+Enter to send
+                </span>
+              </div>
             </div>
           </div>
         )}
@@ -320,10 +394,14 @@ export default function ChatInterface() {
                               {String(children).replace(/\n$/, '')}
                             </SyntaxHighlighter>
                             <button
-                              onClick={() => copyToClipboard(String(children))}
+                              onClick={() => copyToClipboard(String(children), msg.id)}
                               className="absolute top-2 right-2 p-1.5 rounded bg-white/10 opacity-0 group-hover/code:opacity-100 transition-opacity hover:bg-white/20"
                             >
-                              <Copy size={14} className="text-white" />
+                              {copiedMessageId === msg.id ? (
+                                <CheckCircle size={14} className="text-green-400" />
+                              ) : (
+                                <Copy size={14} className="text-white" />
+                              )}
                             </button>
                           </div>
                         ) : (
@@ -345,11 +423,15 @@ export default function ChatInterface() {
               {msg.sender === 'ai' && (
                 <div className="flex items-center gap-2 mt-4 pt-3 border-t border-white/5 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
-                    onClick={() => copyToClipboard(msg.text)}
+                    onClick={() => copyToClipboard(msg.text, msg.id)}
                     className="p-1.5 rounded hover:bg-white/5 text-gray-500 hover:text-white transition-colors"
                     title="Copy response"
                   >
-                    <Copy size={12} />
+                    {copiedMessageId === msg.id ? (
+                      <CheckCircle size={12} className="text-green-400" />
+                    ) : (
+                      <Copy size={12} />
+                    )}
                   </button>
                   <button
                     onClick={() => handleFeedback(msg.id, 'up')}
@@ -401,17 +483,25 @@ export default function ChatInterface() {
       </div>
 
       {/* ==================== SMART SUGGESTIONS BAR ==================== */}
-      {showSuggestions && suggestions.length > 0 && !isProcessing && (
+      {showSuggestions && suggestions.length > 0 && !isProcessing && backendConnected && (
         <div className="mt-3 px-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
-          <div className="flex items-center gap-2 text-[9px] text-gray-500 uppercase tracking-widest mb-2">
-            <Sparkles size={10} />
-            <span>Suggested Actions</span>
+          <div className="flex items-center justify-between text-[9px] text-gray-500 uppercase tracking-widest mb-2">
+            <div className="flex items-center gap-1">
+              <Sparkles size={10} />
+              <span>Suggested Actions</span>
+            </div>
+            <button 
+              onClick={() => setShowSuggestions(false)}
+              className="hover:text-white transition-colors"
+            >
+              <X size={10} />
+            </button>
           </div>
           <div className="flex flex-wrap gap-2">
             {suggestions.map((suggestion) => (
               <button
                 key={suggestion.id}
-                onClick={() => handleSend(undefined, suggestion.text)}
+                onClick={() => handleSend(suggestion.text)}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[10px] uppercase tracking-widest transition-all duration-300 hover:scale-105 ${
                   suggestion.type === 'ide'
                     ? 'border-[#bc13fe]/30 text-[#bc13fe] hover:bg-[#bc13fe]/10'
@@ -432,13 +522,13 @@ export default function ChatInterface() {
       <div className="mt-3 shrink-0 px-2 pb-2 relative flex flex-col gap-2">
         
         {/* Live Context Telemetry Bar */}
-        {mode === 'passive' && permissions.ideIntegration && (
+        {mode === 'passive' && permissions.ideIntegration && activeContext.file && (
           <div className="flex items-center justify-between px-2 opacity-80 transition-opacity hover:opacity-100">
             <div className="flex items-center gap-2 text-[10px] font-mono tracking-widest text-gray-400">
               <Activity size={12} className="text-[#bc13fe] animate-pulse" />
               <span className="uppercase">Active Context:</span>
               <span className="px-2 py-0.5 rounded bg-white/5 border border-[#bc13fe]/30 text-[#bc13fe]">
-                {activeContext.file || 'No file detected'}
+                {activeContext.file}
               </span>
             </div>
             {activeContext.lastModified && (
@@ -459,7 +549,7 @@ export default function ChatInterface() {
         </div>
 
         {/* Input Form */}
-        <form onSubmit={handleSend} className="relative flex items-center group z-10 w-full">
+        <form onSubmit={(e) => { e.preventDefault(); handleSend(); }} className="relative flex items-center group z-10 w-full">
           <Terminal className={`absolute left-5 transition-colors duration-300 ${
             isTyping 
               ? isPassive ? 'text-[#bc13fe]' : 'text-[#00f3ff]'
@@ -470,23 +560,25 @@ export default function ChatInterface() {
             ref={inputRef}
             type="text"
             value={isRecording ? 'Listening to operator...' : input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => setInput(e.target.value.slice(0, MAX_CHARS))}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 handleSend();
               }
             }}
-            disabled={isRecording || isProcessing}
+            disabled={isRecording || isProcessing || !backendConnected}
             placeholder={
-              isRecording 
-                ? 'Listening...' 
-                : `Query Local Vault... ${isPassive ? '(OCR & Sockets Monitoring)' : ''}`
+              !backendConnected
+                ? 'AI Core Offline...'
+                : isRecording 
+                  ? 'Listening...' 
+                  : `Query Local Vault... ${isPassive ? '(OCR & Sockets Monitoring)' : ''}`
             }
-            className={`w-full input-3d rounded-xl py-5 pl-14 pr-32 text-white focus:outline-none font-mono text-sm placeholder-gray-600 shadow-2xl transition-all duration-300 ${
+            className={`w-full input-3d rounded-xl py-5 pl-14 pr-32 text-white focus:outline-none font-mono text-sm placeholder-gray-600 shadow-2xl transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed ${
               isTyping ? 'typing-glow border-opacity-100' : 'border-opacity-50'
             } ${isRecording ? 'border-red-500/50 bg-red-950/10 text-red-400' : ''} ${
-              isProcessing ? 'opacity-50 cursor-not-allowed' : ''
+              isProcessing || !backendConnected ? 'opacity-50 cursor-not-allowed' : ''
             }`}
           />
           
@@ -495,13 +587,13 @@ export default function ChatInterface() {
             <button 
               type="button"
               onClick={toggleRecording}
-              disabled={isProcessing}
-              className={`p-3 rounded-lg flex items-center justify-center transition-all duration-300 ${
+              disabled={isProcessing || !backendConnected || !permissions.micEnabled}
+              className={`p-3 rounded-lg flex items-center justify-center transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed ${
                 isRecording 
                   ? 'bg-red-500/20 text-red-500 shadow-[0_0_15px_rgba(239,68,68,0.4)] animate-pulse' 
                   : 'bg-transparent text-gray-500 hover:text-white hover:bg-white/5'
-              } ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
-              title="Voice Input"
+              }`}
+              title={permissions.micEnabled ? "Voice Input" : "Enable Mic in Settings"}
             >
               <Mic size={18} />
             </button>
@@ -509,9 +601,9 @@ export default function ChatInterface() {
             {/* Send Button */}
             <button 
               type="submit" 
-              disabled={(!input.trim() && !isRecording) || isProcessing}
+              disabled={!canSend}
               className={`p-3 rounded-lg flex items-center justify-center transition-all duration-300 ${
-                (!input.trim() && !isRecording) || isProcessing
+                !canSend
                   ? 'bg-transparent text-gray-600 cursor-not-allowed' 
                   : `bg-[#1f1f1f] ${
                     isPassive 
@@ -534,17 +626,23 @@ export default function ChatInterface() {
 
         {/* Input Helper Text */}
         <div className="flex justify-between items-center px-2">
-          <div className="text-[8px] text-gray-600 uppercase tracking-widest">
+          <div className="text-[8px] uppercase tracking-widest">
             {isRecording ? (
               <span className="text-red-400 flex items-center gap-1">
                 <AlertCircle size={8} /> Recording... Press again to stop
               </span>
+            ) : !backendConnected ? (
+              <span className="text-red-400">Backend Offline</span>
+            ) : !permissions.micEnabled ? (
+              <span className="text-gray-500">Enable mic for voice input</span>
             ) : (
-              <span>Press Enter to send • Shift+Enter for new line</span>
+              <span className="text-gray-600">Press Enter to send • Shift+Enter for new line</span>
             )}
           </div>
-          <div className="text-[8px] text-gray-600 uppercase tracking-widest">
-            {input.length}/1000
+          <div className={`text-[8px] uppercase tracking-widest ${
+            charCount > MAX_CHARS * 0.9 ? 'text-red-400' : 'text-gray-600'
+          }`}>
+            {charCount}/{MAX_CHARS}
           </div>
         </div>
       </div>
