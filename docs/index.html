@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HackT Runtime | Sovereign AI Agent</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=JetBrains+Mono:wght@400;700&display=swap');
+
+        :root {
+            --bg-deep: #030305;
+            --bg-surface: #0a0a0f;
+            --accent-cyan: #00f3ff;
+            --accent-purple: #bc13fe;
+            --text-main: #e0e0e0;
+            --text-muted: #888888;
+            --glass-border: rgba(255, 255, 255, 0.08);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background-color: var(--bg-deep);
+            color: var(--text-main);
+            font-family: 'Inter', sans-serif;
+            overflow-x: hidden;
+            line-height: 1.6;
+        }
+
+        /* Ambient Background Glow */
+        .ambient-light {
+            position: fixed;
+            top: -20%; left: -10%; width: 50vw; height: 50vw;
+            background: radial-gradient(circle, rgba(0,243,255,0.05) 0%, transparent 70%);
+            z-index: 0; pointer-events: none;
+        }
+        .ambient-light.purple {
+            top: auto; bottom: -20%; left: auto; right: -10%;
+            background: radial-gradient(circle, rgba(188,19,254,0.05) 0%, transparent 70%);
+        }
+
+        /* Typography & Utilities */
+        h1, h2, h3, .mono { font-family: 'JetBrains Mono', monospace; }
+        .text-cyan { color: var(--accent-cyan); }
+        .text-purple { color: var(--accent-purple); }
+        .glass-panel {
+            background: rgba(10, 10, 15, 0.6);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            position: relative;
+            z-index: 10;
+        }
+
+        /* Navigation */
+        nav {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 24px 5%; border-bottom: 1px solid var(--glass-border);
+            position: fixed; width: 100%; top: 0; z-index: 100;
+            background: rgba(3, 3, 5, 0.8); backdrop-filter: blur(10px);
+        }
+        .logo { font-size: 1.5rem; font-weight: 700; letter-spacing: 2px; }
+
+        /* Hero Section */
+        .hero {
+            min-height: 100vh; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; text-align: center;
+            padding: 0 5%; position: relative; z-index: 10;
+        }
+        .hero-badge {
+            font-size: 0.8rem; font-family: 'JetBrains Mono', monospace;
+            padding: 6px 12px; border: 1px solid var(--accent-cyan);
+            border-radius: 20px; color: var(--accent-cyan); margin-bottom: 24px;
+            box-shadow: 0 0 10px rgba(0,243,255,0.2);
+            animation: pulse 2s infinite;
+        }
+        .hero h1 { font-size: clamp(2.5rem, 6vw, 4.5rem); line-height: 1.1; margin-bottom: 24px; letter-spacing: -1px; }
+        .hero p { font-size: 1.2rem; color: var(--text-muted); max-width: 700px; margin-bottom: 40px; }
+
+        /* Dynamic Terminal */
+        .terminal-container {
+            width: 100%; max-width: 600px; text-align: left;
+            margin-bottom: 40px; font-size: 0.9rem; color: #a0a0a0;
+        }
+        .terminal-header {
+            background: #151515; padding: 8px 16px; border-radius: 8px 8px 0 0;
+            display: flex; gap: 8px; border: 1px solid var(--glass-border); border-bottom: none;
+        }
+        .dot { width: 10px; height: 10px; border-radius: 50%; background: #333; }
+        .dot:nth-child(1) { background: #ff5f56; } .dot:nth-child(2) { background: #ffbd2e; } .dot:nth-child(3) { background: #27c93f; }
+        .terminal-body {
+            padding: 20px; border-radius: 0 0 8px 8px;
+            border: 1px solid var(--glass-border); border-top: none;
+            height: 120px; overflow: hidden;
+        }
+
+        /* Buttons */
+        .btn-primary {
+            display: none; /* Hidden during boot sequence */
+            padding: 16px 32px; background: rgba(0, 243, 255, 0.1);
+            color: var(--accent-cyan); border: 1px solid var(--accent-cyan);
+            border-radius: 6px; font-family: 'JetBrains Mono', monospace;
+            font-size: 1rem; font-weight: bold; cursor: pointer; text-decoration: none;
+            letter-spacing: 1px; transition: all 0.3s ease;
+            box-shadow: 0 0 20px rgba(0,243,255,0.15);
+        }
+        .btn-primary:hover {
+            background: var(--accent-cyan); color: #000;
+            box-shadow: 0 0 30px rgba(0,243,255,0.4); transform: translateY(-2px);
+        }
+
+        /* Features Grid */
+        .features { padding: 100px 5%; position: relative; z-index: 10; }
+        .section-title { text-align: center; margin-bottom: 60px; font-size: 2.5rem; }
+        .grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px; max-width: 1200px; margin: 0 auto;
+        }
+        .feature-card {
+            padding: 40px 30px; transition: all 0.4s ease;
+            opacity: 0; transform: translateY(30px); /* For JS scroll reveal */
+        }
+        .feature-card.visible { opacity: 1; transform: translateY(0); }
+        .feature-card:hover { border-color: var(--accent-purple); box-shadow: 0 10px 30px rgba(188,19,254,0.1); transform: translateY(-5px); }
+        .feature-icon { font-size: 2rem; margin-bottom: 20px; }
+        .feature-card h3 { font-size: 1.5rem; margin-bottom: 16px; color: #fff; }
+        .feature-card p { color: var(--text-muted); font-size: 1rem; }
+
+        /* Footer */
+        footer {
+            text-align: center; padding: 40px 20px; border-top: 1px solid var(--glass-border);
+            font-size: 0.9rem; color: #666; margin-top: 50px;
+        }
+        footer a { color: var(--text-muted); text-decoration: none; margin: 0 15px; transition: color 0.3s; }
+        footer a:hover { color: var(--accent-cyan); }
+
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(0, 243, 255, 0.4); } 70% { box-shadow: 0 0 0 10px rgba(0, 243, 255, 0); } 100% { box-shadow: 0 0 0 0 rgba(0, 243, 255, 0); } }
+    </style>
+</head>
+<body>
+    <div class="ambient-light"></div>
+    <div class="ambient-light purple"></div>
+
+    <nav>
+        <div class="logo mono">HACKT<span class="text-cyan">.AI</span></div>
+        <div class="mono text-muted" style="font-size: 0.8rem;">V1.0.0 PRODUCTION BETA</div>
+    </nav>
+
+    <section class="hero">
+        <div class="hero-badge">SYSTEM STATUS: READY FOR DEPLOYMENT</div>
+        <h1>Sovereign Security <br> <span class="text-purple">Knowledge Vault</span></h1>
+        <p>A completely localized, multi-modal cybersecurity agent. Deep system integration, hardware-aware scaling, and zero cloud dependency. Your data stays on your rig.</p>
+
+        <div class="terminal-container">
+            <div class="terminal-header">
+                <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+            </div>
+            <div class="terminal-body glass-panel mono" id="terminal-text">
+                > Initializing startup sequence...
+            </div>
+        </div>
+
+        <a href="#" class="btn-primary" id="download-btn">DOWNLOAD RUNTIME (.EXE)</a>
+    </section>
+
+    <section class="features">
+        <h2 class="section-title mono">CORE <span class="text-cyan">ARCHITECTURE</span></h2>
+        <div class="grid" id="feature-grid">
+            
+            <div class="feature-card glass-panel">
+                <div class="feature-icon">🧠</div>
+                <h3>Hardware-Aware Logic</h3>
+                <p>Features a dynamic toggle. Run strictly <b>Active Mode</b> (Qwen 3.5 reasoning) for low-spec machines, or unlock <b>Passive Mode</b> to engage full background monitoring if your rig has 6GB+ Dedicated VRAM.</p>
+            </div>
+
+            <div class="feature-card glass-panel" style="transition-delay: 0.1s;">
+                <div class="feature-icon">👁️</div>
+                <h3>Florence-2 Vision OCR</h3>
+                <p>Passive mode triggers advanced screen capture pipelines. HackT natively reads your IDE and browser windows, detecting phishing attempts and vulnerable code syntax in real-time.</p>
+            </div>
+
+            <div class="feature-card glass-panel" style="transition-delay: 0.2s;">
+                <div class="feature-icon">🔐</div>
+                <h3>Local Cryptographic Vault</h3>
+                <p>Powered by LanceDB and KùzuDB graph vectors. HackT learns from your projects, remembers past vulnerabilities, and builds a personalized, air-gapped threat intelligence database.</p>
+            </div>
+
+        </div>
+    </section>
+
+    <footer>
+        <p>&copy; 2026 HackT Systems. Built for Windows 11.</p>
+        <div style="margin-top: 20px;">
+            <a href="privacy.html">Privacy Policy</a>
+            <a href="#">Documentation</a>
+            <a href="#">GitHub Repository</a>
+        </div>
+    </footer>
+
+    <script>
+        // Terminal Boot Sequence Animation
+        const terminal = document.getElementById('terminal-text');
+        const downloadBtn = document.getElementById('download-btn');
+        
+        const bootLines = [
+            "> Establishing secure local runtime...",
+            "> Bypassing cloud dependencies...",
+            "> Hardware check: VRAM > 6GB [PASSIVE MODE UNLOCKED]",
+            "> Mounting KùzuDB vector graphs...",
+            "> SYSTEM ONLINE. READY FOR OPERATOR LOGIN."
+        ];
+
+        let lineIndex = 0;
+        const bootSequence = setInterval(() => {
+            if (lineIndex < bootLines.length) {
+                terminal.innerHTML += `<br><span style="color: ${lineIndex === 4 ? '#00f3ff' : '#a0a0a0'}">${bootLines[lineIndex]}</span>`;
+                lineIndex++;
+            } else {
+                clearInterval(bootSequence);
+                downloadBtn.style.display = 'inline-block';
+            }
+        }, 800);
+
+        // Scroll Reveal Animation for Feature Cards
+        const observerOptions = { threshold: 0.1, rootMargin: "0px 0px -50px 0px" };
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                    observer.unobserve(entry.target);
+                }
+            });
+        }, observerOptions);
+
+        document.querySelectorAll('.feature-card').forEach(card => observer.observe(card));
+    </script>
+</body>
+</html>

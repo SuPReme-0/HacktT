@@ -1,0 +1,70 @@
+# ==============================================================================
+# 1. NODE / REACT (Frontend)
+# ==============================================================================
+node_modules/
+dist/
+dist-ssr/
+*.local
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ==============================================================================
+# 2. RUST / TAURI (Desktop Core)
+# ==============================================================================
+src-tauri/target/
+src-tauri/binaries/*
+!src-tauri/binaries/.gitkeep
+
+# Ignore compiled sidecars (The Python .exe)
+src-tauri/binaries/*.exe
+src-tauri/binaries/*-x86_64-pc-windows-msvc.exe
+
+# ==============================================================================
+# 3. PYTHON / AI BACKEND (Sovereign Core)
+# ==============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+venv/
+env/
+.env
+
+# AI MODELS (DO NOT UPLOAD 10GB+ TO GIT)
+# We ignore the actual model weights. The installer will download these.
+models/
+core/models/
+*.bin
+*.onnx
+*.pt
+*.pth
+*.gguf
+
+# LANCEDB / VECTOR STORE
+data/
+*.db
+*.lancedb
+
+# ==============================================================================
+# 4. BUILD & DEPLOYMENT
+# ==============================================================================
+build/
+bin/
+*.spec
+_internal/
+
+# Windows specific
+Thumbs.db
+desktop.ini
+
+# IDE Specific
+.vscode/
+.idea/
+*.swp
+*.swo

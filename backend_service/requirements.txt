@@ -1,0 +1,13 @@
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+llama-cpp-python==0.2.56
+sentence-transformers==2.3.1
+optimum[onnxruntime-gpu]==1.16.0
+lancedb==0.5.0
+kuzudb==0.6.0
+pynvml==11.5.0
+trafilatura==1.7.0
+rank-bm25==0.2.2
+pydantic==2.5.3
+python-multipart==0.0.6
+mss==9.0.1
