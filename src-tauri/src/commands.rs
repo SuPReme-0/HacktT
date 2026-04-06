@@ -1,7 +1,11 @@
 use serde::{Deserialize, Serialize};
 use reqwest::Client;
 use tauri::api::process::Command as TauriSidecar;
+use tauri::Manager; // Required for app_handle() and path_resolver()
 use uuid::Uuid;
+use std::fs::File;
+use std::io::Write;
+use futures_util::StreamExt; // Required for chunked downloading
 
 #[derive(Serialize)]
 pub struct ChatResponse {
@@ -14,6 +18,55 @@ pub struct ChatRequest {
     pub prompt: String,
     pub mode: String,
     pub session_id: String,
+}
+
+#[derive(Clone, Serialize)]
+pub struct ProgressPayload {
+    loaded: u64,
+    total: u64,
+}
+
+// ------------------------------------------------------------------
+// 0. MODEL DOWNLOADER (Memory-Safe Streaming to Disk)
+// ------------------------------------------------------------------
+#[tauri::command]
+pub async fn download_model_rust(
+    window: tauri::Window,
+    url: String,
+    filename: String,
+    save_path: String,
+) -> Result<(), String> {
+    // Resolve secure AppData directory for the models
+    let app_dir = window.app_handle().path_resolver().app_data_dir()
+        .ok_or("Failed to resolve AppData directory")?;
+    
+    let target_dir = app_dir.join(&save_path);
+    std::fs::create_dir_all(&target_dir).map_err(|e| format!("Failed to create dirs: {}", e))?;
+    
+    let file_path = target_dir.join(&filename);
+    let mut file = File::create(&file_path).map_err(|e| format!("Failed to create file: {}", e))?;
+
+    // Initiate HTTP Request
+    let response = reqwest::get(&url).await.map_err(|e| format!("Request failed: {}", e))?;
+    let total_size = response.content_length().unwrap_or(0);
+
+    let mut stream = response.bytes_stream();
+    let mut downloaded: u64 = 0;
+
+    // Stream directly to disk, bypassing WebView RAM limits
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| e.to_string())?;
+        file.write_all(&chunk).map_err(|e| format!("Disk write failed: {}", e))?;
+        downloaded += chunk.len() as u64;
+
+        // Emit real-time progress back to the React UI
+        let _ = window.emit("download_progress", ProgressPayload {
+            loaded: downloaded,
+            total: total_size,
+        });
+    }
+
+    Ok(())
 }
 
 // ------------------------------------------------------------------
@@ -40,6 +93,7 @@ pub async fn get_system_vram() -> Result<u64, String> {
             }
         }
     }
+    // Fallback if not Windows or WMI fails
     Ok(8192)
 }
 
@@ -65,6 +119,8 @@ pub fn spawn_python_backend() -> Result<String, String> {
 // ------------------------------------------------------------------
 #[tauri::command]
 pub async fn send_chat_message(prompt: String, mode: String, session_id: String) -> Result<ChatResponse, String> {
+    // Note: For real-time streaming, React should fetch() the SSE endpoint directly.
+    // This command is useful for non-streaming fallback/testing.
     let client = Client::new();
     let payload = ChatRequest { prompt, mode, session_id };
 
@@ -239,4 +295,17 @@ pub async fn stop_mic() -> Result<String, String> {
         .send().await.map_err(|e| e.to_string())?;
     if res.status().is_success() { Ok("Microphone Disengaged".into()) } 
     else { Err("Failed to stop Microphone".into()) }
+}
+
+#[tauri::command]
+pub async fn close_splashscreen(window: tauri::Window) {
+    // Close splashscreen
+    if let Some(splashscreen) = window.get_window("splashscreen") {
+        splashscreen.close().unwrap();
+    }
+    // Show main window
+    if let Some(main_window) = window.get_window("main") {
+        main_window.show().unwrap();
+        main_window.set_focus().unwrap();
+    }
 }

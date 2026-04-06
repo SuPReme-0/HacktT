@@ -4,6 +4,7 @@
 )]
 
 mod commands;
+mod permissions; // <-- ADDED: The permissions module we just built
 
 use tauri::{
     CustomMenuItem, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu,
@@ -29,6 +30,19 @@ fn build_tray_menu() -> SystemTray {
         .add_item(CustomMenuItem::new("quit".to_string(), "Terminate Engine"));
         
     SystemTray::new().with_menu(tray_menu)
+}
+
+// ==============================================================================
+// NEW: SETUP COMPLETE MARKER
+// ==============================================================================
+#[tauri::command]
+fn mark_setup_complete(app_handle: tauri::AppHandle) -> Result<(), String> {
+    let app_dir = app_handle.path_resolver().app_data_dir().ok_or("Failed to resolve app data dir")?;
+    std::fs::create_dir_all(&app_dir).map_err(|e| e.to_string())?;
+    
+    let setup_flag = app_dir.join("setup_complete");
+    std::fs::File::create(setup_flag).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 fn main() {
@@ -76,6 +90,7 @@ fn main() {
         // ==============================================================================
         .on_window_event(|event| match event.event() {
             WindowEvent::CloseRequested { api, .. } => {
+                // Prevent actual closing, just hide it to keep the background daemon alive
                 api.prevent_close();
                 event.window().hide().unwrap();
             }
@@ -94,7 +109,20 @@ fn main() {
             // A. Spawn the Python AI Core silently in the background
             let _ = commands::spawn_python_backend();
 
-            // B. Listen for incoming Google OAuth deep links
+            // B. FIRST-RUN SETUP CHECK
+            let app_dir = app.path_resolver().app_data_dir().unwrap_or_default();
+            let _ = std::fs::create_dir_all(&app_dir); // Ensure directory exists
+            let setup_flag = app_dir.join("setup_complete");
+
+            if !setup_flag.exists() {
+                // It's the first time running! Redirect React to the setup wizard.
+                if let Some(window) = app.get_window("main") {
+                    // Use eval to safely change the React Router hash
+                    window.eval("window.location.hash = '/setup'").unwrap_or_default();
+                }
+            }
+
+            // C. Listen for incoming Google OAuth deep links
             let handle = app.handle();
             app.listen_global("scheme-request-received", move |event| {
                 if let Some(payload) = event.payload() {
@@ -108,15 +136,15 @@ fn main() {
                 }
             });
 
-            // ✅ REMOVED: Fake HTTP Proxy Thread (No longer needed with WebSockets)
-
             Ok(())
         })
         
         // ==============================================================================
-        // 7. IPC COMMAND REGISTRATION (Cleaned)
+        // 7. IPC COMMAND REGISTRATION (Cleaned & Expanded)
         // ==============================================================================
         .invoke_handler(tauri::generate_handler![
+            // From commands.rs
+            commands::close_splashscreen
             commands::get_system_vram,
             commands::send_chat_message,
             commands::trigger_google_auth,
@@ -130,8 +158,16 @@ fn main() {
             commands::stop_vision,
             commands::trigger_screen_scan,
             commands::start_mic,
-            commands::stop_mic
-            // ✅ REMOVED: show_bubble_window, hide_bubble_window, emit_*_event
+            commands::stop_mic,
+            commands::download_model_rust, 
+
+            // From permissions.rs
+            permissions::request_microphone_permission,
+            permissions::request_screen_capture_permission,
+            permissions::set_startup_enabled,
+            
+            // From main.rs
+            mark_setup_complete
         ])
         .run(tauri::generate_context!())
         .expect("Critical Error: HackT runtime failed to initialize");

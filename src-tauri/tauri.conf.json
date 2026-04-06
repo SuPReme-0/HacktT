@@ -24,15 +24,38 @@
       "externalBin": [
         "binaries/backend_service"
       ],
+      "copyright": "© 2026 HackT Systems",
+      "category": "DeveloperTool",
+      "shortDescription": "Sovereign AI Security Agent",
       "windows": {
+        "certificateThumbprint": null,
+        "digestAlgorithm": "sha256",
+        "timestampUrl": "http://timestamp.digicert.com",
         "nsis": {
           "installMode": "perMachine",
-          "displayLanguageSelector": false
+          "displayLanguageSelector": false,
+          "installerIcon": "icons/installer.ico",
+          "headerImage": "../installer-assets/header.bmp",
+          "sidebarImage": "../installer-assets/sidebar.bmp",
+          "backgroundImage": "../installer-assets/background.bmp",
+          "license": "../installer-assets/license.txt",
+          "compression": "lzma",
+          "customInclude": "../installer-assets/nsis/installer.nsh"
         }
       }
     },
     "allowlist": {
       "all": false,
+      "app": {
+        "all": true
+      },
+      "dialog": {
+        "all": true
+      },
+      "fs": {
+        "all": true,
+        "scope": ["$APPDATA/HackT/**", "$RESOURCE/**"]
+      },
       "shell": {
         "all": false,
         "open": true,
@@ -48,10 +71,13 @@
         "all": false,
         "show": true,
         "hide": true,
-        "setAlwaysOnTop": true
+        "setAlwaysOnTop": true,
+        "setFocus": true,
+        "setDecorations": true
       },
       "protocol": {
-        "asset": true
+        "asset": true,
+        "assetScope": ["$APPDATA/HackT/**"]
       }
     },
     "systemTray": {
@@ -61,15 +87,22 @@
     "windows": [
       {
         "label": "main",
+        "url": "/",
         "title": "HackT Sovereign Agent",
         "width": 1200,
         "height": 800,
-        "minWidth": 1024,
-        "minHeight": 768,
-        "center": true,
-        "resizable": true,
-        "fullscreen": false,
-        "visible": true
+        "visible": false, 
+        "center": true
+      },
+      {
+        "label": "splashscreen",
+        "url": "/splash.html",
+        "width": 400,
+        "height": 400,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "center": true
       },
       {
         "label": "bubble",
@@ -86,7 +119,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self' tauri: http://localhost:8080 http://127.0.0.1:8080 ws://localhost:8080 ws://127.0.0.1:8080 'unsafe-inline' 'unsafe-eval'; img-src 'self' asset: tauri: data:; font-src 'self' data:; connect-src 'self' tauri: http://localhost:8080 http://127.0.0.1:8080 ws://localhost:8080 ws://127.0.0.1:8080;"
     }
   }
 }

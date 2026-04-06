@@ -1,103 +1,135 @@
-from fastapi import FastAPI, HTTPException, Request
+"""
+HackT Sovereign Core - Master Entry Point
+==========================================
+Bootstraps the FastAPI application, mounts modular routers, 
+and manages the lifecycle of all Sovereign AI microservices.
+"""
+
+import sys
+import asyncio
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse
-from pydantic import BaseModel
-from typing import List, Optional
-import logging
-import uvicorn
 
-from core.llm import LLMManager, llm_manager
-from core.retriever import HackTRetriever, retriever
+# 1. Utilities
+from utils.config import config
+from utils.logger import get_logger, log_system_info
+
+# 2. Core Engines (Importing the singletons)
+from core.memory import vram_guard
 from core.embedder import embedder
-from core.vision import vision_manager
-from utils.memory import vram_guard
-from utils.logger import get_logger
+from core.rag import retriever
+from core.engine import engine
 
-# Configure Logging
-logging.basicConfig(level=logging.INFO)
 logger = get_logger("hackt.main")
 
-app = FastAPI(title="HackT Runtime API", version="1.0.0")
+# ======================================================================
+# Global State (Exported for services/ local imports)
+# ======================================================================
+app_state = {
+    "mode": config.mode,
+    "threat_level": "safe",
+    "backend_health": {
+        "cpu_usage": 0,
+        "memory_usage": 0,
+        "active_scans": 0
+    }
+}
 
-# Fixed Bug #7: CORS Configuration
+# ======================================================================
+# Lifespan Manager (Startup & Teardown Sequences)
+# ======================================================================
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Orchestrates the boot sequence of the Sovereign Agent"""
+    
+    # --- BOOT SEQUENCE ---
+    log_system_info()
+    logger.info("🚀 Booting HackT Sovereign Core...")
+    
+    # 1. Warm up the VRAM Gatekeeper
+    vram_guard._detect_hardware()
+    
+    # 2. Pre-load the Master LLM (if VRAM allows)
+    engine.load_llm()
+    
+    # 3. Wake up the Background Daemons
+    from services.websocket import telemetry_manager
+    from services.idle_manager import idle_manager
+    from services.port_listeners import integration_manager
+    from services.monitor import screen_monitor
+    
+    # Start WebSockets & Telemetry
+    telemetry_manager.start()
+    
+    # Start Autonomous Engagement (JARVIS voice)
+    idle_manager.start()
+    
+    # Open native ports for VS Code & Chrome Extensions
+    await integration_manager.start_ide_socket(port=8081)
+    await integration_manager.start_browser_socket(port=8082)
+    
+    # Start vision monitoring if booting into Passive Mode
+    if config.mode == "passive":
+        screen_monitor.start()
+        
+    logger.info(f"✅ Sovereign Core ONLINE on port {config.port}. Awaiting Tauri Frontend...")
+    
+    yield  # --- APP RUNS HERE ---
+    
+    # --- SHUTDOWN SEQUENCE ---
+    logger.info("🛑 Commencing shutdown sequence...")
+    
+    # 1. Stop all daemons and listeners
+    telemetry_manager.stop()
+    idle_manager.stop()
+    screen_monitor.stop()
+    await integration_manager.stop_ide_socket()
+    await integration_manager.stop_browser_socket()
+    
+    # 2. Flush AI Models from VRAM safely
+    engine.unload_vision()
+    engine.unload_llm()
+    embedder.unload()
+    vram_guard.emergency_cleanup()
+    
+    logger.info("✅ Shutdown complete. System secure.")
+
+# ======================================================================
+# FastAPI Application & Routing
+# ======================================================================
+app = FastAPI(
+    title="HackT Sovereign Core", 
+    version="1.0.0", 
+    lifespan=lifespan
+)
+
+# Cross-Origin Resource Sharing (Allows Tauri to talk to Python)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Restrict in production to tauri://localhost
+    allow_origins=config.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Fixed Bug #10: Global Exception Handler
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    logger.error(f"Unhandled error: {exc}")
-    return JSONResponse(
-        status_code=500,
-        content={"error": "Internal server error", "details": "Contact support"}
-    )
+# Mount the modular routers we built!
+from services.http_api import api_router
+from services.websocket import telemetry_router
 
-# Fixed Bug #11: Health Check
-@app.get("/api/health")
-async def health_check():
-    return {
-        "status": "healthy",
-        "gpu_available": torch.cuda.is_available(),
-        "vram_free_gb": vram_guard.get_free_vram_gb(),
-        "llm_loaded": llm_manager.llm is not None
-    }
+app.include_router(api_router, prefix="/api")
+app.include_router(telemetry_router)
 
-# Pydantic Models (Fixed Bug #6)
-class ChatRequest(BaseModel):
-    prompt: str
-    mode: str = "active"  # active | passive
-
-class EmbedRequest(BaseModel):
-    text: str
-
-class VisionRequest(BaseModel):
-    image_base64: str
-
-# Initialize Models on Startup
-@app.on_event("startup")
-async def startup_event():
-    global llm_manager, retriever
-    llm_manager = LLMManager("models/qwen-3.5-4b-q4.gguf")
-    retriever = HackTRetriever("models/indices")
-
-# Fixed Bug #5: Embedding Endpoint
-@app.post("/api/embed")
-async def embed_text(request: EmbedRequest):
-    try:
-        vector = embedder.encode(request.text)
-        return {"vector": vector.tolist()}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# Chat Endpoint (Streaming)
-@app.post("/api/chat")
-async def chat(request: ChatRequest):
-    try:
-        # 1. Embed Query
-        vector = embedder.encode(request.prompt)
-        # 2. Retrieve Context
-        context = retriever.get_hybrid_context(request.prompt, vector)
-        # 3. Stream LLM Response
-        return StreamingResponse(
-            llm_manager.stream_chat(request.prompt, context),
-            media_type="text/event-stream"
-        )
-    except Exception as e:
-        logger.error(f"Chat error: {e}")
-        raise HTTPException(status_code=500, detail="Chat processing failed")
-
-# Vision Endpoint (On-Demand)
-@app.post("/api/vision/scan")
-async def scan_screen(request: VisionRequest):
-    # Decode image logic here
-    result = vision_manager.analyze(request.image_base64)
-    vision_manager.unload()  # Free VRAM immediately
-    return result
-
+# ======================================================================
+# Server Execution
+# ======================================================================
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    import uvicorn
+    # uvicorn runs the web server. We pull host/port dynamically from config.
+    uvicorn.run(
+        "main:app", 
+        host=config.host, 
+        port=config.port, 
+        reload=config.reload,
+        log_level="warning" # Keeps uvicorn quiet so our custom logger shines
+    )

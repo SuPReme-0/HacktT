@@ -1,0 +1,50 @@
+{
+  "version": "1.0.0",
+  "models": [
+    {
+      "name": "Qwen 3.5 4B (4-bit GGUF)",
+      "filename": "qwen-3.5-4b-q4_k_m.gguf",
+      "size_gb": 2.5,
+      "url": "https://huggingface.co/Qwen/Qwen3.5-4B-Instruct-GGUF/resolve/main/qwen-3.5-4b-q4_k_m.gguf",
+      "mirror_url": "https://github.com/yourusername/hackt-models/releases/download/v1.0.0/qwen-3.5-4b-q4_k_m.gguf",
+      "sha256": "abc123...",
+      "required": true,
+      "path": "models/"
+    },
+    {
+      "name": "Florence-2 Base",
+      "filename": "florence-2-base",
+      "size_gb": 0.8,
+      "url": "https://huggingface.co/microsoft/Florence-2-base/resolve/main/",
+      "mirror_url": "https://github.com/yourusername/hackt-models/releases/download/v1.0.0/florence-2-base.zip",
+      "sha256": "def456...",
+      "required": false,
+      "path": "models/florence-2-base/",
+      "note": "Required for Passive Mode (Vision OCR)"
+    },
+    {
+      "name": "Nomic Embed Text v1.5",
+      "filename": "nomic-embed-text-v1.5",
+      "size_gb": 0.3,
+      "url": "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main/",
+      "mirror_url": "https://github.com/yourusername/hackt-models/releases/download/v1.0.0/nomic-embed-text-v1.5.zip",
+      "sha256": "ghi789...",
+      "required": true,
+      "path": "models/nomic-embed-text-v1.5/"
+    },
+    {
+      "name": "Knowledge Vault (LanceDB + KùzuDB)",
+      "filename": "vault-v21.0-lite",
+      "size_gb": 6.0,
+      "url": "https://github.com/yourusername/hackt-models/releases/download/v1.0.0/vault-v21.0-lite.zip",
+      "mirror_url": "https://cdn.hackt.ai/vault/v21.0-lite.zip",
+      "sha256": "jkl012...",
+      "required": true,
+      "path": "vault/",
+      "note": "Cybersecurity knowledge base"
+    }
+  ],
+  "total_size_gb": 9.6,
+  "download_timeout_seconds": 3600,
+  "retry_attempts": 3
+}

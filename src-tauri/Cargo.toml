@@ -13,9 +13,13 @@ tauri = { version = "1.5", features = [ "shell-sidecar", "shell-open", "window-s
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.33", features = ["full"] }
-reqwest = { version = "0.11", features = ["json", "blocking"] }
+# FIXED: Added 'stream' for the first-run setup model downloader
+reqwest = { version = "0.11", features = ["json", "blocking", "stream"] }
+futures-util = "0.3" 
 tauri-plugin-deep-link = "0.1"
 uuid = { version = "1.4", features = ["v4"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 wmi = "0.13"
+# FIXED: Added windows crate for permissions.rs COM initialization
+windows = { version = "0.48", features = ["Win32_System_Com"] }
