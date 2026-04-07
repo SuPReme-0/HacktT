@@ -1,0 +1,50 @@
+# HackT Sovereign Core - Master Requirements (Upgraded)
+# =====================================================
+
+# FastAPI & Web Server
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+websockets==14.1
+python-multipart==0.0.20
+
+# Bootstrap & Model Management
+huggingface-hub==0.28.1
+
+# --- Core AI Inference ---
+# CRITICAL UPGRADE: Version >=0.3.5 required for 'qwen35' architecture support.
+llama-cpp-python==0.3.20
+sentence-transformers==3.4.1
+faster-whisper==1.2.0
+
+# Vector Database & RAG
+lancedb==0.17.0
+kuzu==0.8.2
+
+# Vision & Image Processing
+torch==2.2.0
+torchvision==0.17.0
+transformers==4.49.0
+Pillow==11.0.0
+mss==10.0.0
+
+# System & Hardware Monitoring
+pynvml==11.5.0
+psutil==6.1.0
+sounddevice==0.5.1
+soundfile==0.12.1
+
+# File Watching & Utilities
+watchdog==6.0.0
+trafilatura==1.12.2
+pydantic==2.10.6
+pydantic-settings==2.7.0
+
+# Data & Monitoring
+pandas==2.2.3
+
+# Summarization & Utilities
+accelerate==1.3.0
+tqdm==4.67.1
+
+# Windows-specific (Only for Windows environments)
+pywin32==310 ; platform_system == "Windows"
