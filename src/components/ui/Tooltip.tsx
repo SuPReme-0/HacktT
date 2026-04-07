@@ -25,11 +25,16 @@ export default function Tooltip({
       className="relative inline-block"
       onMouseEnter={() => setIsVisible(true)}
       onMouseLeave={() => setIsVisible(false)}
+      // ✅ Added keyboard focus support (events bubble up from the child)
+      onFocus={() => setIsVisible(true)}
+      onBlur={() => setIsVisible(false)}
     >
       {children}
       
       {isVisible && (
         <div
+          // ✅ Added accessibility role
+          role="tooltip"
           className={`absolute z-50 px-2 py-1 bg-[#0a0a0f] border border-white/10 text-[10px] text-gray-300 rounded whitespace-nowrap ${positionStyles[position]}`}
         >
           {content}

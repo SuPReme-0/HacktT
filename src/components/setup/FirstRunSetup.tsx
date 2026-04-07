@@ -11,7 +11,7 @@ interface Model {
   path: string;
   url: string;           // <-- ADDED THIS (Fixes TS Error 2339)
   mirror_url?: string;   // <-- Added optional mirror
-  sha256?: string 
+  sha256?: string; 
   note?: string;
 }
 
@@ -44,9 +44,9 @@ export default function FirstRunSetup() {
       for (let i = 0; i < models.length; i++) {
         const model = models[i];
         setCurrentModel(model.name);
-        setDownloadProgress(0); // Reset for the new model
+        setDownloadProgress(0); 
         
-        // 1. Set up the listener for this specific model's progress
+        // 1. Set up the listener
         const unlisten = await listen<{ loaded: number, total: number }>(
           'download_progress', 
           (event) => {
@@ -57,22 +57,24 @@ export default function FirstRunSetup() {
           }
         );
 
-        // 2. Instruct Rust to handle the heavy HTTP streaming and disk I/O
-        await invoke('download_model_rust', { 
-          url: model.url, 
-          filename: model.filename,
-          savePath: model.path 
-        });
-        
-        // 3. Cleanup the listener before moving to the next model
-        unlisten();
+        try {
+          // 2. Instruct Rust to download
+          await invoke('download_model_rust', { 
+            url: model.url, 
+            filename: model.filename,
+            savePath: model.path 
+          });
+        } finally {
+          // 3. GUARANTEED Cleanup: runs whether invoke succeeds or throws an error
+          unlisten();
+        }
       }
       
       setCurrentStep('complete');
     } catch (err: any) {
       console.error("Download pipeline failed:", err);
       setError(typeof err === 'string' ? err : err.message || "Model download failed. Check your connection.");
-      setCurrentStep('models'); // Kick them back so they can retry
+      setCurrentStep('models'); 
     }
   };
 
@@ -86,8 +88,15 @@ export default function FirstRunSetup() {
         await invoke('request_screen_capture_permission');
       }
       setCurrentStep('models');
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) { // <-- Removed ': any'
+      // ✅ Handle both Tauri string rejections and standard JS Errors
+      if (typeof err === 'string') {
+        setError(err);
+      } else if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('Failed to acquire permissions');
+      }
     }
   };
 

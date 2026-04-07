@@ -36,20 +36,16 @@ export default function AuthScreen() {
   useEffect(() => {
     checkSession();
 
-    // ✅ MOCK-SAFE: Only listen if Tauri is available
-    let unlisten: (() => void) | undefined;
+    // Store the promise so we can await it during cleanup if needed
+    let unlistenPromise: Promise<() => void> | null = null;
     
     const setupOAuthListener = async () => {
       try {
-        // Dynamic import to avoid errors in web testing
         const { listen } = await import('@tauri-apps/api/event');
         
-        unlisten = await listen('oauth_callback', (event) => {
+        unlistenPromise = listen('oauth_callback', (event) => {
           const payload = event.payload as { 
-            name: string; 
-            email: string; 
-            avatar: string; 
-            token: string 
+            name: string; email: string; avatar: string; token: string 
           };
           
           if (payload.email) {
@@ -63,25 +59,26 @@ export default function AuthScreen() {
           }
         });
       } catch {
-        // Tauri not available (web testing mode) - silently fail
         console.warn('OAuth listener not available (web mode)');
       }
     };
 
     setupOAuthListener();
 
+    // ✅ CORRECT CLEANUP: Resolve the promise to call the unlisten function
     return () => {
-      unlisten?.();
+      if (unlistenPromise) {
+        unlistenPromise.then(unlisten => unlisten());
+      }
     };
   }, [checkSession, setUser]);
-
   // ======================================================================
   // 2. COUNTDOWN TIMER FOR OTP RESEND
   // ======================================================================
   useEffect(() => {
     if (countdown > 0) {
-      const timer = setInterval(() => setCountdown(c => c - 1), 1000);
-      return () => clearInterval(timer);
+      const timer = setTimeout(() => setCountdown(c => c - 1), 1000);
+      return () => clearTimeout(timer);
     }
   }, [countdown]);
 
@@ -106,8 +103,9 @@ export default function AuthScreen() {
     setError(null);
     try {
       await loginWithGoogle();
-    } catch (err: any) {
-      setError(err.message || 'Google authentication failed');
+    } catch (err) { // <-- Removed : any
+      if (err instanceof Error) setError(err.message);
+      else setError('Google authentication failed');
     } finally {
       setAuthLoading(false);
     }
@@ -122,8 +120,13 @@ export default function AuthScreen() {
       setAuthStep('otp');
       setCountdown(30);
       setSuccess('Access code transmitted to your email.');
-    } catch (err: any) {
-      setError(err.message || 'Failed to send access code');
+    } catch (err) {
+      // ✅ Safe error checking
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('Failed to send access code');
+      }
     } finally {
       setAuthLoading(false);
     }
@@ -147,8 +150,9 @@ export default function AuthScreen() {
         });
         setSuccess('Identity verified. Access granted.');
       }
-    } catch (err: any) {
-      setError(err.message || 'Invalid access code');
+    } catch (err) { // <-- Removed : any
+      if (err instanceof Error) setError(err.message);
+      else setError('Invalid access code');
     } finally {
       setAuthLoading(false);
     }
@@ -167,8 +171,9 @@ export default function AuthScreen() {
         avatarUrl: `https://ui-avatars.com/api/?name=${encodeURIComponent(operatorName)}&background=0a0a0a&color=00f3ff&rounded=true&bold=true`
       });
       setSuccess('Operator profile initialized. Welcome to HackT.');
-    } catch (err: any) {
-      setError(err.message || 'Profile setup failed');
+    } catch (err) { // <-- Removed : any
+      if (err instanceof Error) setError(err.message);
+      else setError('Profile setup failed');
     } finally {
       setAuthLoading(false);
     }
@@ -180,8 +185,9 @@ export default function AuthScreen() {
       await sendEmailOtp(emailAuth);
       setCountdown(30);
       setSuccess('New access code sent.');
-    } catch (err: any) {
-      setError(err.message || 'Failed to resend code');
+    } catch (err) { // <-- Removed : any
+      if (err instanceof Error) setError(err.message);
+      else setError('Failed to resend code');
     }
   };
 
@@ -263,7 +269,7 @@ export default function AuthScreen() {
       
       <button 
         type="submit" 
-        disabled={authLoading || !emailAuth}
+        disabled={authLoading}
         className="w-full py-4 bg-[#1f1f1f] text-gray-300 rounded-xl hover:text-[#00f3ff] hover:bg-black hover:border-[#00f3ff]/30 transition-all border border-transparent hover:shadow-[0_0_20px_rgba(0,243,255,0.2)] text-sm tracking-widest font-bold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
       >
         {authLoading ? (
@@ -383,7 +389,7 @@ export default function AuthScreen() {
       
       <button 
         type="submit" 
-        disabled={authLoading || operatorName.length < 2}
+        disabled={authLoading}
         className="w-full py-4 bg-[#00f3ff]/10 text-[#00f3ff] rounded-xl hover:bg-[#00f3ff]/20 transition-all border border-[#00f3ff]/30 hover:shadow-[0_0_25px_rgba(0,243,255,0.3)] text-sm tracking-widest font-bold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
       >
         {authLoading ? (

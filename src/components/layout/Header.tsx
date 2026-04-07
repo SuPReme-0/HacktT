@@ -3,8 +3,9 @@ import ModeToggle from '../ui/ModeToggle';
 import Avatar from '../ui/Avatar';
 
 export default function Header() {
-  const { toggleSidebar, user } = useSystemStore();
-  const isSidebarOpen = useSystemStore.getState().isSidebarOpen;
+  const toggleSidebar = useSystemStore((state) => state.toggleSidebar);
+  const user = useSystemStore((state) => state.user);
+  const isSidebarOpen = useSystemStore((state) => state.isSidebarOpen);
 
   return (
     <header className="absolute top-0 w-full h-16 border-b border-white/10 bg-[#030305]/80 backdrop-blur-md flex items-center justify-between px-6 z-20">

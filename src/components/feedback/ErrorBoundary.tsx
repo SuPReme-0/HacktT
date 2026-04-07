@@ -11,6 +11,7 @@ interface ErrorBoundaryProps {
 export default function ErrorBoundary({ error, onRetry }: ErrorBoundaryProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
+  const systemVRAM = useSystemStore((state) => state.systemVRAM);
   // ======================================================================
   // 1. CANVAS RENDERER: THE CORRUPTED RED BINARY STATIC
   // ======================================================================
@@ -25,10 +26,11 @@ export default function ErrorBoundary({ error, onRetry }: ErrorBoundaryProps) {
     canvas.height = window.innerHeight;
 
     const fontSize = 16;
-    const columns = Math.ceil(canvas.width / fontSize);
-    const rows = Math.ceil(canvas.height / fontSize);
+    
 
     const draw = () => {
+      const columns = Math.ceil(canvas.width / fontSize);
+      const rows = Math.ceil(canvas.height / fontSize);
       // Fill background
       ctx.fillStyle = '#030305'; 
       ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -99,7 +101,7 @@ export default function ErrorBoundary({ error, onRetry }: ErrorBoundaryProps) {
           <div className="flex items-center justify-between text-[8px] text-gray-500 uppercase tracking-widest mb-2 border-b border-red-500/10 pb-1">
             <span>Exception Report</span>
             {/* FIXED: Accessed store safely */}
-            <span>VRAM:{useSystemStore.getState().systemVRAM || 'N/A'}MB</span>
+            <span>VRAM:{systemVRAM || 'N/A'}MB</span>
           </div>
           <p className="text-xs text-white leading-relaxed break-all whitespace-pre-wrap selection:bg-red-500/30">
             {error || 'Fatal logic error detected in Tauri Core. No specific exception payload was provided. Backend response timed out or returned HTTP/500.'}

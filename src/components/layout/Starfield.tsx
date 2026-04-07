@@ -49,7 +49,8 @@ export default function Starfield({
     canvas.style.height = `${height}px`;
     ctx.scale(dpr, dpr);
 
-    let mouse = { x: width / 2, y: height / 2 };
+    // Initialize mouse far off-screen to prevent the "center hole" bug
+    let mouse = { x: -9999, y: -9999 };
 
     const stars: Star[] = [];
     const colorVariants: Star['colorVariant'][] = ['cyan', 'cyan', 'cyan', 'purple', 'white'];
@@ -73,22 +74,14 @@ export default function Starfield({
     const getStarColor = (variant: Star['colorVariant'], currentOpacity: number) => {
       const { threatLevel: currentThreat } = propsRef.current;
       
-      if (currentThreat === 'high') {
-        return `rgba(255, 0, 60, ${currentOpacity})`;
-      }
-      if (currentThreat === 'medium') {
-        return `rgba(255, 176, 0, ${currentOpacity})`;
-      }
+      if (currentThreat === 'high') return `rgba(255, 0, 60, ${currentOpacity})`;
+      if (currentThreat === 'medium') return `rgba(255, 176, 0, ${currentOpacity})`;
       
       switch (variant) {
-        case 'cyan':
-          return `rgba(0, 243, 255, ${currentOpacity})`;
-        case 'purple':
-          return `rgba(188, 19, 254, ${currentOpacity})`;
-        case 'white':
-          return `rgba(255, 255, 255, ${currentOpacity})`;
-        default:
-          return `rgba(0, 243, 255, ${currentOpacity})`;
+        case 'cyan': return `rgba(0, 243, 255, ${currentOpacity})`;
+        case 'purple': return `rgba(188, 19, 254, ${currentOpacity})`;
+        case 'white': return `rgba(255, 255, 255, ${currentOpacity})`;
+        default: return `rgba(0, 243, 255, ${currentOpacity})`;
       }
     };
 
@@ -98,21 +91,26 @@ export default function Starfield({
       time += 0.016;
 
       starsRef.current.forEach((star) => {
-        const { opacity: currentOpacity } = propsRef.current;
+        const { opacity: currentOpacity, mode: currentMode } = propsRef.current;
         const twinkle = Math.sin(time * star.twinkleSpeed * 100 + star.x) * 0.2 + 0.8;
         const finalOpacity = currentOpacity * star.baseOpacity * twinkle;
 
-        star.x += star.vx;
-        star.y += star.vy;
+        // Utilize the 'mode' prop to slow down stars in passive mode
+        const speedMultiplier = currentMode === 'passive' ? 0.3 : 1;
+        star.x += (star.vx * speedMultiplier);
+        star.y += (star.vy * speedMultiplier);
 
-        const dx = mouse.x - star.x;
-        const dy = mouse.y - star.y;
-        const distanceSquared = dx * dx + dy * dy;
-        
-        if (distanceSquared < 10000) {
-          const force = 0.01 * (1 - distanceSquared / 10000);
-          star.x -= dx * force;
-          star.y -= dy * force;
+        // Only calculate mouse repulsion if in 'active' mode
+        if (currentMode === 'active') {
+          const dx = mouse.x - star.x;
+          const dy = mouse.y - star.y;
+          const distanceSquared = dx * dx + dy * dy;
+          
+          if (distanceSquared < 10000) {
+            const force = 0.01 * (1 - distanceSquared / 10000);
+            star.x -= dx * force;
+            star.y -= dy * force;
+          }
         }
 
         if (star.x < 0) star.x = width;
@@ -146,12 +144,36 @@ export default function Starfield({
       mouse.y = e.clientY;
     };
 
+    // Add touch support for mobile users
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length > 0) {
+        mouse.x = e.touches[0].clientX;
+        mouse.y = e.touches[0].clientY;
+      }
+    };
+
+    // Reset mouse when cursor leaves the window
+    const handleMouseLeave = () => {
+      mouse = { x: -9999, y: -9999 };
+    };
+
+    // ✅ FIX: Define handleTouchEnd so it resets the coordinates when the finger lifts
+    const handleTouchEnd = () => {
+      mouse = { x: -9999, y: -9999 };
+    };
+
     window.addEventListener('resize', handleResize);
     window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('touchmove', handleTouchMove);
+    window.addEventListener('touchend', handleTouchEnd); // ✅ Listener attached
+    document.addEventListener('mouseleave', handleMouseLeave);
 
     return () => {
       window.removeEventListener('resize', handleResize);
       window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleTouchEnd); // ✅ Listener cleaned up
+      document.removeEventListener('mouseleave', handleMouseLeave);
       cancelAnimationFrame(animationFrameRef.current);
     };
   }, []);

@@ -13,7 +13,9 @@ export default function ProgressBar({
   showLabel = false,
   className = '',
 }: ProgressBarProps) {
-  const percentage = Math.min((value / max) * 100, 100);
+  // ✅ Prevents division by zero and clamps the value between 0 and 100
+  const safeMax = max > 0 ? max : 1; 
+  const percentage = Math.max(0, Math.min((value / safeMax) * 100, 100));
   
   const variantColors = {
     cyan: 'bg-[#00f3ff]',
@@ -23,7 +25,14 @@ export default function ProgressBar({
   };
 
   return (
-    <div className={`w-full space-y-1 ${className}`}>
+    <div 
+      className={`w-full space-y-1 ${className}`}
+      // ✅ Added Accessibility (a11y) roles
+      role="progressbar"
+      aria-valuenow={value}
+      aria-valuemin={0}
+      aria-valuemax={safeMax}
+    >
       <div className="h-1 bg-[#1f1f1f] rounded-full overflow-hidden">
         <div
           className={`h-full ${variantColors[variant]} transition-all duration-500`}
@@ -32,7 +41,7 @@ export default function ProgressBar({
       </div>
       
       {showLabel && (
-        <div className="flex justify-between text-[9px] text-gray-500 uppercase tracking-wider">
+        <div className="flex justify-between text-[9px] text-gray-500 uppercase tracking-wider" aria-hidden="true">
           <span>{value}</span>
           <span>{max}</span>
         </div>

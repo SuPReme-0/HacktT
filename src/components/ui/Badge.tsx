@@ -1,3 +1,5 @@
+import React from 'react';
+
 interface BadgeProps {
   children: React.ReactNode;
   variant?: 'cyan' | 'purple' | 'red' | 'green' | 'yellow' | 'gray';
@@ -27,6 +29,16 @@ export default function Badge({
     md: 'px-3 py-1 text-[10px]',
   };
 
+  // ✅ Extracted dot colors into a clean mapping object
+  const dotColors = {
+    cyan: 'bg-[#00f3ff]',
+    purple: 'bg-[#bc13fe]',
+    red: 'bg-[#ff003c]',
+    green: 'bg-[#00ff88]',
+    yellow: 'bg-[#ffb000]',
+    gray: 'bg-gray-400',
+  };
+
   return (
     <span
       className={`inline-flex items-center gap-1.5 border rounded font-mono uppercase tracking-wider ${
@@ -34,14 +46,7 @@ export default function Badge({
       } ${sizeStyles[size]} ${pulse ? 'animate-pulse' : ''} ${className}`}
     >
       {pulse && (
-        <span className={`w-1.5 h-1.5 rounded-full ${
-          variant === 'cyan' ? 'bg-[#00f3ff]' :
-          variant === 'purple' ? 'bg-[#bc13fe]' :
-          variant === 'red' ? 'bg-[#ff003c]' :
-          variant === 'green' ? 'bg-[#00ff88]' :
-          variant === 'yellow' ? 'bg-[#ffb000]' :
-          'bg-gray-400'
-        }`} />
+        <span className={`w-1.5 h-1.5 rounded-full ${dotColors[variant]}`} />
       )}
       {children}
     </span>

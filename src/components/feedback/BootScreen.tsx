@@ -13,6 +13,12 @@ export default function BootScreen({ progress, threatLevel }: BootScreenProps) {
   // ======================================================================
   // 1. RANDOMIZED SYSTEM LOGS
   // ======================================================================
+  const progressRef = useRef(progress);
+
+  useEffect(() => {
+    progressRef.current = progress;
+  }, [progress]);
+
   useEffect(() => {
     const logs = [
       'MOUNTING LOCAL KNOWLEDGE VAULT...',
@@ -24,16 +30,17 @@ export default function BootScreen({ progress, threatLevel }: BootScreenProps) {
     ];
     
     const interval = setInterval(() => {
-      // Pick a random log based on the progress
-      if (progress < 100) {
+      // Check the ref instead of the prop
+      if (progressRef.current < 100) {
         setLoadingText(logs[Math.floor(Math.random() * logs.length)]);
       } else {
         setLoadingText('SYSTEM SECURE. READY.');
       }
     }, 400);
 
+    // Empty dependency array ensures this interval is never interrupted
     return () => clearInterval(interval);
-  }, [progress]);
+  }, []);
 
   // ======================================================================
   // 2. CANVAS RENDERING: STARS & BINARY RAIN
@@ -116,8 +123,18 @@ export default function BootScreen({ progress, threatLevel }: BootScreenProps) {
 
     // Handle Resize
     const handleResize = () => {
+      // ✅ ADD THESE BACK: Update the actual canvas internal resolution
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
+
+      // Recalculate how many columns we need based on the new width
+      const newColumns = Math.floor(canvas.width / fontSize);
+      
+      // If the screen got wider, add more drops to fill the empty space on the right
+      if (newColumns > drops.length) {
+        const extraDrops = Array.from({ length: newColumns - drops.length }).map(() => (Math.random() * -100));
+        drops.push(...extraDrops);
+      }
     };
     window.addEventListener('resize', handleResize);
 
@@ -172,7 +189,7 @@ export default function BootScreen({ progress, threatLevel }: BootScreenProps) {
             {/* The actual progress fill */}
             <div 
               className="absolute top-0 left-0 h-full bg-[#00f3ff] transition-all duration-300 ease-out relative"
-              style={{ width: `${progress}%` }}
+              style={{ width: `${Math.min(progress, 100)}%` }}
             >
               {/* Hot glowing tip on the progress bar */}
               <div className="absolute right-0 top-0 bottom-0 w-4 bg-white blur-[2px]" />

@@ -9,7 +9,6 @@ interface AppLayoutProps {
   children: React.ReactNode;
   showSidebar?: boolean;
   showHeader?: boolean;
-  isBackendConnected?: boolean;
 }
 
 export default function AppLayout({ 
@@ -17,8 +16,9 @@ export default function AppLayout({
   showSidebar = true, 
   showHeader = true 
 }: AppLayoutProps) {
-  const { threatLevel, mode, isSidebarOpen } = useSystemStore();
-
+  const threatLevel = useSystemStore((state) => state.threatLevel);
+  const mode = useSystemStore((state) => state.mode);
+  const isSidebarOpen = useSystemStore((state) => state.isSidebarOpen);
   return (
     <div className="relative w-screen h-screen bg-[#030305] text-white overflow-hidden font-mono">
       {/* 1. Background (Persistent) */}

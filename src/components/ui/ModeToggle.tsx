@@ -3,7 +3,11 @@ import { useSystemStore } from '../../store/systemStore';
 import { Zap, Activity, AlertTriangle } from 'lucide-react';
 
 export default function ModeToggle() {
-  const { mode, toggleMode, systemVRAM } = useSystemStore();
+  // ✅ Correctly subscribed using individual selectors to prevent re-renders
+  const mode = useSystemStore((state) => state.mode);
+  const toggleMode = useSystemStore((state) => state.toggleMode);
+  const systemVRAM = useSystemStore((state) => state.systemVRAM);
+  
   const [isThundering, setIsThundering] = useState(false);
   const [isToggling, setIsToggling] = useState(false);
   

@@ -1,7 +1,7 @@
 import { useSystemStore } from '../../store/systemStore';
 
 export default function ConnectionStatus() {
-  const { backendConnected } = useSystemStore();
+  const backendConnected = useSystemStore((state) => state.backendConnected);
 
   return (
     <div className="fixed top-4 right-4 z-40 flex items-center gap-2 px-3 py-1.5 rounded-full 
