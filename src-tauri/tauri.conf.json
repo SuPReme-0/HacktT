@@ -21,8 +21,8 @@
         "icons/icon.icns",
         "icons/icon.ico"
       ],
-      "externalBin": [
-        "binaries/backend_service"
+      "resources": [
+        "resources/hackt_sovereign_core/**/*"
       ],
       "copyright": "© 2026 HackT Systems",
       "category": "DeveloperTool",
@@ -58,14 +58,7 @@
       },
       "shell": {
         "all": false,
-        "open": true,
-        "sidecar": true,
-        "scope": [
-          {
-            "name": "binaries/backend_service",
-            "sidecar": true
-          }
-        ]
+        "open": true
       },
       "window": {
         "all": false,
@@ -119,7 +112,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' tauri: http://localhost:8080 http://127.0.0.1:8080 ws://localhost:8080 ws://127.0.0.1:8080 'unsafe-inline' 'unsafe-eval'; img-src 'self' asset: tauri: data:; font-src 'self' data:; connect-src 'self' tauri: http://localhost:8080 http://127.0.0.1:8080 ws://localhost:8080 ws://127.0.0.1:8080;"
+      "csp": "default-src 'self' tauri: http://localhost:8000 http://127.0.0.1:8000 ws://localhost:8000 ws://127.0.0.1:8000 'unsafe-inline' 'unsafe-eval'; img-src 'self' asset: tauri: data:; font-src 'self' data:; connect-src 'self' tauri: http://localhost:8000 http://127.0.0.1:8000 ws://localhost:8000 ws://127.0.0.1:8000;"
     }
   }
 }

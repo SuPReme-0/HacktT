@@ -1,311 +1,178 @@
-use serde::{Deserialize, Serialize};
-use reqwest::Client;
-use tauri::api::process::Command as TauriSidecar;
-use tauri::Manager; // Required for app_handle() and path_resolver()
+use tauri::command;
+use tauri::Manager;
+use std::process::{Command, Stdio, Child};
+use std::io::{BufRead, BufReader};
+use std::thread;
+use std::sync::Mutex;
 use uuid::Uuid;
-use std::fs::File;
-use std::io::Write;
-use futures_util::StreamExt; // Required for chunked downloading
 
-#[derive(Serialize)]
-pub struct ChatResponse {
-    pub reply: String,
-    pub status: String,
+// ==============================================================================
+// Shared State for Backend Process Management
+// ==============================================================================
+
+/// Holds the Python backend process so we can kill it on exit
+pub struct BackendState(pub Mutex<Option<Child>>);
+
+// ==============================================================================
+// Event Payloads (Serializable for Tauri -> React)
+// ==============================================================================
+
+#[derive(Clone, serde::Serialize)]
+pub struct BootstrapperLog {
+    pub text: String,
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct ChatRequest {
-    pub prompt: String,
-    pub mode: String,
-    pub session_id: String,
+#[derive(Clone, serde::Serialize)]
+pub struct BackendLog {
+    pub text: String,
 }
 
-#[derive(Clone, Serialize)]
-pub struct ProgressPayload {
-    loaded: u64,
-    total: u64,
-}
+// ==============================================================================
+// 1. RUN PYTHON MODEL BOOTSTRAPPER (The Setup Wizard)
+// ==============================================================================
 
-// ------------------------------------------------------------------
-// 0. MODEL DOWNLOADER (Memory-Safe Streaming to Disk)
-// ------------------------------------------------------------------
 #[tauri::command]
-pub async fn download_model_rust(
-    window: tauri::Window,
-    url: String,
-    filename: String,
-    save_path: String,
-) -> Result<(), String> {
-    // Resolve secure AppData directory for the models
-    let app_dir = window.app_handle().path_resolver().app_data_dir()
-        .ok_or("Failed to resolve AppData directory")?;
+pub async fn run_model_bootstrapper(window: tauri::Window) -> Result<String, String> {
+    // We call the MAIN executable, but pass the "--bootstrap" flag
+    let backend_exe = window.app_handle().path_resolver()
+        .resolve_resource("resources/hackt_sovereign_core/hackt_sovereign_core.exe")
+        .ok_or("Failed to locate backend executable in resources")?;
+
+    let mut child = Command::new(&backend_exe)
+        .arg("--bootstrap") // 🔥 Tells main.py to download models instead of starting the server
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        // .creation_flags(0x08000000) // Uncomment on Windows to hide the console window
+        .spawn()
+        .map_err(|e| format!("Failed to spawn bootstrapper: {}", e))?;
+
+    // Take stdout/stderr BEFORE spawning threads to avoid moving child
+    let stdout = child.stdout.take()
+        .ok_or("Failed to capture bootstrapper stdout")?;
+    let stderr = child.stderr.take()
+        .ok_or("Failed to capture bootstrapper stderr")?;
     
-    let target_dir = app_dir.join(&save_path);
-    std::fs::create_dir_all(&target_dir).map_err(|e| format!("Failed to create dirs: {}", e))?;
+    let window_clone_out = window.clone();
+    let window_clone_err = window.clone();
+    let window_clone_finish = window.clone();
+
+    // Stream stdout to React
+    thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines().map_while(Result::ok) {
+            let _ = window_clone_out.emit("bootstrapper_log", BootstrapperLog { text: line });
+        }
+    });
+
+    // Stream stderr to React
+    thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines().map_while(Result::ok) {
+            let _ = window_clone_err.emit("bootstrapper_log", BootstrapperLog { 
+                text: format!("[ERROR] {}", line) 
+            });
+        }
+    });
+
+    // 🔥 FIX: Wait for the process in a detached background thread to prevent UI freezing
+    thread::spawn(move || {
+        match child.wait() {
+            Ok(status) if status.success() => {
+                let _ = window_clone_finish.emit("bootstrapper_complete", "success");
+            }
+            Ok(_) => {
+                let _ = window_clone_finish.emit("bootstrapper_complete", "failed_nonzero");
+            }
+            Err(e) => {
+                let _ = window_clone_finish.emit("bootstrapper_complete", format!("failed: {}", e));
+            }
+        }
+    });
+
+    Ok("Bootstrapper initiated".to_string())
+}
+
+// ==============================================================================
+// 2. SPAWN MAIN PYTHON BACKEND (Manual Start after setup)
+// ==============================================================================
+
+#[tauri::command]
+pub fn spawn_python_backend(
+    app_handle: tauri::AppHandle, 
+    state: tauri::State<'_, BackendState>
+) -> Result<String, String> {
     
-    let file_path = target_dir.join(&filename);
-    let mut file = File::create(&file_path).map_err(|e| format!("Failed to create file: {}", e))?;
+    let resource_path = app_handle.path_resolver()
+        .resolve_resource("resources/hackt_sovereign_core/hackt_sovereign_core.exe")
+        .ok_or("Failed to locate main backend executable")?;
 
-    // Initiate HTTP Request
-    let response = reqwest::get(&url).await.map_err(|e| format!("Request failed: {}", e))?;
-    let total_size = response.content_length().unwrap_or(0);
+    let mut child = Command::new(&resource_path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to start AI Core: {}", e))?;
 
-    let mut stream = response.bytes_stream();
-    let mut downloaded: u64 = 0;
+    let pid = child.id();
 
-    // Stream directly to disk, bypassing WebView RAM limits
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| e.to_string())?;
-        file.write_all(&chunk).map_err(|e| format!("Disk write failed: {}", e))?;
-        downloaded += chunk.len() as u64;
-
-        // Emit real-time progress back to the React UI
-        let _ = window.emit("download_progress", ProgressPayload {
-            loaded: downloaded,
-            total: total_size,
+    // Stream backend logs to React (with graceful window access)
+    if let Some(stdout) = child.stdout.take() {
+        // Clone app_handle instead of window to avoid borrow issues
+        let app_handle_clone = app_handle.clone();
+        thread::spawn(move || {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines().map_while(Result::ok) {
+                // Try to get window, but don't panic if it's not ready
+                if let Some(window) = app_handle_clone.get_window("main") {
+                    let _ = window.emit("backend_log", BackendLog { text: line });
+                }
+            }
         });
     }
 
-    Ok(())
+    // 🔥 FIX: Lock the Mutex and store the child process so we can kill it when the app closes
+    let mut backend_guard = state.0.lock().map_err(|e| format!("Failed to lock backend state: {}", e))?;
+    *backend_guard = Some(child);
+
+    Ok(format!("AI Core Initialized. PID: {}", pid))
 }
 
-// ------------------------------------------------------------------
-// 1. HARDWARE VRAM CHECK (Windows Specific via WMI)
-// ------------------------------------------------------------------
-#[tauri::command]
-pub async fn get_system_vram() -> Result<u64, String> {
-    #[cfg(target_os = "windows")]
-    {
-        use wmi::{COMLibrary, WMIConnection};
-        use std::collections::HashMap;
+// ==============================================================================
+// 3. UTILITIES
+// ==============================================================================
 
-        let com_con = COMLibrary::new().map_err(|e| e.to_string())?;
-        let wmi_con = WMIConnection::new(com_con).map_err(|e| e.to_string())?;
-        
-        let results: Vec<HashMap<String, wmi::Variant>> = wmi_con
-            .raw_query("SELECT AdapterRAM FROM Win32_VideoController")
-            .map_err(|e| e.to_string())?;
-
-        if let Some(gpu) = results.get(0) {
-            if let Some(wmi::Variant::I8(ram)) = gpu.get("AdapterRAM") {
-                let vram_mb = (*ram as u64) / (1024 * 1024);
-                return Ok(vram_mb);
-            }
-        }
-    }
-    // Fallback if not Windows or WMI fails
-    Ok(8192)
-}
-
-// ------------------------------------------------------------------
-// 2. SPAWN PYTHON AI BACKEND (Using Tauri Sidecar)
-// ------------------------------------------------------------------
-#[tauri::command]
-pub fn spawn_python_backend() -> Result<String, String> {
-    match TauriSidecar::new_sidecar("backend_service")
-        .expect("Failed to locate backend_service sidecar binary")
-        .args(["--port", "8080"])
-        .spawn()
-    {
-        Ok((_rx, child)) => {
-            Ok(format!("AI Core Initialized. PID: {}", child.pid()))
-        }
-        Err(e) => Err(format!("Failed to start AI Core Sidecar: {}", e)),
-    }
-}
-
-// ------------------------------------------------------------------
-// 3. SEND CHAT TO QWEN 3.5 (Via local HTTP - Port 8080)
-// ------------------------------------------------------------------
-#[tauri::command]
-pub async fn send_chat_message(prompt: String, mode: String, session_id: String) -> Result<ChatResponse, String> {
-    // Note: For real-time streaming, React should fetch() the SSE endpoint directly.
-    // This command is useful for non-streaming fallback/testing.
-    let client = Client::new();
-    let payload = ChatRequest { prompt, mode, session_id };
-
-    let res = client.post("http://127.0.0.1:8080/api/chat")
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if res.status().is_success() {
-        let response_text = res.text().await.map_err(|e| e.to_string())?;
-        Ok(ChatResponse {
-            reply: response_text,
-            status: "success".into(),
-        })
-    } else {
-        Err(format!("Backend returned error: {}", res.status()))
-    }
-}
-
-// ------------------------------------------------------------------
-// 4. GOOGLE OAUTH LOGIN NATIVE (Supabase Direct)
-// ------------------------------------------------------------------
 #[tauri::command]
 pub async fn trigger_google_auth(window: tauri::Window) -> Result<String, String> {
-    let supabase_auth_url = "https://YOUR_PROJECT_ID.supabase.co/auth/v1/authorize?provider=google&redirect_to=hackt://auth-callback";
+    // 🚀 Make this configurable via tauri.conf.json or env vars in production
+    let supabase_auth_url = option_env!("SUPABASE_AUTH_URL")
+        .unwrap_or("https://YOUR_PROJECT_ID.supabase.co/auth/v1/authorize?provider=google&redirect_to=hackt://auth-callback");
     
-    tauri::api::shell::open(
-        &window.shell_scope(), 
-        supabase_auth_url, 
-        None
-    ).map_err(|e| e.to_string())?;
-    
+    tauri::api::shell::open(&window.shell_scope(), supabase_auth_url, None)
+        .map_err(|e| e.to_string())?;
     Ok("Auth flow initiated".to_string())
 }
 
-// ------------------------------------------------------------------
-// 5. SET MONITORING MODE (Active vs Passive)
-// ------------------------------------------------------------------
-#[tauri::command]
-pub async fn set_monitoring_mode(mode: String) -> Result<String, String> {
-    let client = Client::new();
-    
-    let res = client.post("http://127.0.0.1:8080/api/system/mode")
-        .json(&serde_json::json!({ "mode": mode }))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if res.status().is_success() {
-        Ok(format!("Backend transitioned to {} mode", mode))
-    } else {
-        Err("Failed to update backend mode".into())
-    }
-}
-
-// ------------------------------------------------------------------
-// 6. SESSION UUID GENERATOR
-// ------------------------------------------------------------------
 #[tauri::command]
 pub fn generate_new_session() -> String {
     Uuid::new_v4().to_string()
 }
 
-// ------------------------------------------------------------------
-// 7. TOGGLE PORT LISTENERS (IDE & Browser Telemetry)
-// ------------------------------------------------------------------
-#[tauri::command]
-pub async fn toggle_port_listener(port: u16, service: String, state: bool) -> Result<String, String> {
-    let client = Client::new();
-    let payload = serde_json::json!({ "port": port, "service": service, "state": state });
-
-    let res = client.post("http://127.0.0.1:8080/api/system/port/toggle")
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if res.status().is_success() {
-        Ok(format!("{} port {} toggled to {}", service, port, state))
-    } else {
-        Err("Failed to toggle listener port".into())
-    }
-}
-
-// ------------------------------------------------------------------
-// 8. TRIGGER UNIVERSAL CODE INJECTION
-// ------------------------------------------------------------------
-#[tauri::command]
-pub async fn trigger_ide_fix_action(session_id: String, instruction: String) -> Result<String, String> {
-    let client = Client::new();
-    let payload = serde_json::json!({ "session_id": session_id, "instruction": instruction });
-
-    let res = client.post("http://127.0.0.1:8080/api/action/fix-universal")
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if res.status().is_success() {
-        Ok("Fix injected successfully".into())
-    } else {
-        Err("Failed to inject fix".into())
-    }
-}
-
-// ------------------------------------------------------------------
-// 9. CLOUD SYNC TRIGGER
-// ------------------------------------------------------------------
-#[tauri::command]
-pub async fn sync_vault_to_cloud() -> Result<String, String> {
-    let client = Client::new();
-    
-    let res = client.post("http://127.0.0.1:8080/api/system/sync")
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if res.status().is_success() {
-        Ok("Vault synchronized to cloud".into())
-    } else {
-        Err("Failed to synchronize vault".into())
-    }
-}
-
-// ------------------------------------------------------------------
-// 10. VISION & OCR CONTROLS
-// ------------------------------------------------------------------
-#[tauri::command]
-pub async fn start_vision() -> Result<String, String> {
-    let client = Client::new();
-    let res = client.post("http://127.0.0.1:8080/api/vision/start")
-        .send().await.map_err(|e| e.to_string())?;
-    if res.status().is_success() { Ok("Vision OCR Engaged".into()) } 
-    else { Err("Failed to start Vision".into()) }
-}
-
-#[tauri::command]
-pub async fn stop_vision() -> Result<String, String> {
-    let client = Client::new();
-    let res = client.post("http://127.0.0.1:8080/api/vision/stop")
-        .send().await.map_err(|e| e.to_string())?;
-    if res.status().is_success() { Ok("Vision OCR Disengaged".into()) } 
-    else { Err("Failed to stop Vision".into()) }
-}
-
-#[tauri::command]
-pub async fn trigger_screen_scan() -> Result<String, String> {
-    let client = Client::new();
-    let res = client.post("http://127.0.0.1:8080/api/vision/scan-now")
-        .send().await.map_err(|e| e.to_string())?;
-    if res.status().is_success() { Ok("Manual Screen Scan Triggered".into()) } 
-    else { Err("Scan failed".into()) }
-}
-
-// ------------------------------------------------------------------
-// 11. MICROPHONE & STT CONTROLS
-// ------------------------------------------------------------------
-#[tauri::command]
-pub async fn start_mic() -> Result<String, String> {
-    let client = Client::new();
-    let res = client.post("http://127.0.0.1:8080/api/audio/mic-start")
-        .send().await.map_err(|e| e.to_string())?;
-    if res.status().is_success() { Ok("Faster-Whisper Listening".into()) } 
-    else { Err("Failed to start Microphone".into()) }
-}
-
-#[tauri::command]
-pub async fn stop_mic() -> Result<String, String> {
-    let client = Client::new();
-    let res = client.post("http://127.0.0.1:8080/api/audio/mic-stop")
-        .send().await.map_err(|e| e.to_string())?;
-    if res.status().is_success() { Ok("Microphone Disengaged".into()) } 
-    else { Err("Failed to stop Microphone".into()) }
-}
-
 #[tauri::command]
 pub async fn close_splashscreen(window: tauri::Window) {
-    // Close splashscreen
+    // Gracefully handle missing windows instead of unwrap()
     if let Some(splashscreen) = window.get_window("splashscreen") {
-        splashscreen.close().unwrap();
+        let _ = splashscreen.close();
     }
-    // Show main window
     if let Some(main_window) = window.get_window("main") {
-        main_window.show().unwrap();
-        main_window.set_focus().unwrap();
+        let _ = main_window.show();
+        let _ = main_window.set_focus();
     }
+}
+
+#[tauri::command]
+pub async fn get_system_info() -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({
+        "platform": std::env::consts::OS,
+        "arch": std::env::consts::ARCH,
+        "note": "For accurate hardware stats, query Python backend at /api/health"
+    }))
 }

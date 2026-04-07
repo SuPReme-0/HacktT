@@ -4,12 +4,13 @@
 )]
 
 mod commands;
-mod permissions; // <-- ADDED: The permissions module we just built
+mod permissions;
 
 use tauri::{
     CustomMenuItem, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu,
     SystemTrayMenuItem, WindowEvent,
 };
+use std::sync::Mutex;
 
 // ==============================================================================
 // 1. SYSTEM TRAY BUILDER
@@ -33,11 +34,12 @@ fn build_tray_menu() -> SystemTray {
 }
 
 // ==============================================================================
-// NEW: SETUP COMPLETE MARKER
+// 2. SETUP COMPLETE MARKER (Thread-Safe)
 // ==============================================================================
 #[tauri::command]
 fn mark_setup_complete(app_handle: tauri::AppHandle) -> Result<(), String> {
-    let app_dir = app_handle.path_resolver().app_data_dir().ok_or("Failed to resolve app data dir")?;
+    let app_dir = app_handle.path_resolver().app_data_dir()
+        .ok_or("Failed to resolve app data dir")?;
     std::fs::create_dir_all(&app_dir).map_err(|e| e.to_string())?;
     
     let setup_flag = app_dir.join("setup_complete");
@@ -46,12 +48,15 @@ fn mark_setup_complete(app_handle: tauri::AppHandle) -> Result<(), String> {
 }
 
 fn main() {
-    // ==============================================================================
-    // 2. DEEP LINK OS REGISTRATION (Windows)
-    // ==============================================================================
-    tauri_plugin_deep_link::prepare("com.hackt.runtime");
+    // Register the custom protocol handler BEFORE the app boots
+    if let Err(e) = tauri_plugin_deep_link::prepare("com.hackt.runtime") {
+        eprintln!("⚠️ Failed to register deep link protocol: {}", e);
+    }
 
     tauri::Builder::default()
+        // 🔥 FIX 2: Properly manage the BackendState so the app doesn't panic
+        .manage(commands::BackendState(Mutex::new(None)))
+        
         // ==============================================================================
         // 3. SYSTEM TRAY EVENT LISTENER
         // ==============================================================================
@@ -59,27 +64,32 @@ fn main() {
         .on_system_tray_event(|app, event| match event {
             SystemTrayEvent::LeftClick { .. } => {
                 if let Some(window) = app.get_window("main") {
-                    window.show().unwrap();
-                    window.set_focus().unwrap();
+                    let _ = window.show();
+                    let _ = window.set_focus();
                 }
             }
             SystemTrayEvent::MenuItemClick { id, .. } => match id.as_str() {
                 "open" => {
                     if let Some(window) = app.get_window("main") {
-                        window.show().unwrap();
-                        window.set_focus().unwrap();
+                        let _ = window.show();
+                        let _ = window.set_focus();
                     }
                 }
                 "quit" => {
-                    println!("Sending kill signal to Python Core...");
-                    let _ = reqwest::blocking::Client::new()
-                        .post("http://127.0.0.1:8080/api/system/shutdown")
-                        .send();
-                    std::process::exit(0);
+                    println!("🛑 OS-Level Shutdown sequence initiated...");
+                    
+                    // 🔥 FIX 2: Absolute OS-level termination. Do not rely on HTTP.
+                    let state = app.state::<commands::BackendState>();
+                    if let Some(mut child) = state.0.lock().unwrap().take() {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                    }
+                    
+                    app.exit(0);
                 }
-                "toggle_vision" => { app.emit_all("tray_toggle_vision", ()).unwrap(); }
-                "toggle_mic" => { app.emit_all("tray_toggle_mic", ()).unwrap(); }
-                "toggle_think" => { app.emit_all("tray_toggle_think", ()).unwrap(); }
+                "toggle_vision" => { let _ = app.emit_all("tray_toggle_vision", ()); }
+                "toggle_mic" => { let _ = app.emit_all("tray_toggle_mic", ()); }
+                "toggle_think" => { let _ = app.emit_all("tray_toggle_think", ()); }
                 _ => {}
             },
             _ => {}
@@ -90,9 +100,8 @@ fn main() {
         // ==============================================================================
         .on_window_event(|event| match event.event() {
             WindowEvent::CloseRequested { api, .. } => {
-                // Prevent actual closing, just hide it to keep the background daemon alive
                 api.prevent_close();
-                event.window().hide().unwrap();
+                let _ = event.window().hide();
             }
             _ => {}
         })
@@ -100,38 +109,40 @@ fn main() {
         // ==============================================================================
         // 5. INJECT DEEP LINK PLUGIN
         // ==============================================================================
-        .plugin(tauri_plugin_deep_link::init())
+        .plugin(
+            tauri_plugin_deep_link::init()
+                .expect("Failed to initialize deep link plugin")
+        )
         
         // ==============================================================================
         // 6. LIFECYCLE & STARTUP HOOKS
         // ==============================================================================
         .setup(|app| {
-            // A. Spawn the Python AI Core silently in the background
-            let _ = commands::spawn_python_backend();
-
-            // B. FIRST-RUN SETUP CHECK
             let app_dir = app.path_resolver().app_data_dir().unwrap_or_default();
-            let _ = std::fs::create_dir_all(&app_dir); // Ensure directory exists
+            let _ = std::fs::create_dir_all(&app_dir);
             let setup_flag = app_dir.join("setup_complete");
 
-            if !setup_flag.exists() {
-                // It's the first time running! Redirect React to the setup wizard.
+            // 🔥 FIX 3: Correct Boot Order. 
+            // Do NOT spawn Python if models aren't downloaded yet!
+            if setup_flag.exists() {
+                let state = app.state::<commands::BackendState>();
+                let _ = commands::spawn_python_backend(app.app_handle(), state);
+            } else {
                 if let Some(window) = app.get_window("main") {
-                    // Use eval to safely change the React Router hash
-                    window.eval("window.location.hash = '/setup'").unwrap_or_default();
+                    let _ = window.eval("window.location.hash = '/setup'");
                 }
             }
 
-            // C. Listen for incoming Google OAuth deep links
+            // Listen for incoming Google OAuth deep links
             let handle = app.handle();
             app.listen_global("scheme-request-received", move |event| {
                 if let Some(payload) = event.payload() {
-                    println!("Intercepted Deep Link: {}", payload);
-                    handle.emit_all("oauth_callback", payload).unwrap();
+                    println!("🔗 Intercepted Deep Link: {}", payload);
+                    let _ = handle.emit_all("oauth_callback", payload);
                     
                     if let Some(window) = handle.get_window("main") {
-                        window.show().unwrap();
-                        window.set_focus().unwrap();
+                        let _ = window.show();
+                        let _ = window.set_focus();
                     }
                 }
             });
@@ -140,35 +151,25 @@ fn main() {
         })
         
         // ==============================================================================
-        // 7. IPC COMMAND REGISTRATION (Cleaned & Expanded)
+        // 7. IPC COMMAND REGISTRATION 
         // ==============================================================================
         .invoke_handler(tauri::generate_handler![
-            // From commands.rs
-            commands::close_splashscreen
-            commands::get_system_vram,
-            commands::send_chat_message,
-            commands::trigger_google_auth,
+            // 🔥 FIX 1: Only register commands that actually exist in the new commands.rs
+            commands::run_model_bootstrapper,
             commands::spawn_python_backend,
-            commands::set_monitoring_mode,
+            commands::trigger_google_auth,
             commands::generate_new_session,
-            commands::toggle_port_listener,
-            commands::trigger_ide_fix_action,
-            commands::sync_vault_to_cloud,
-            commands::start_vision,
-            commands::stop_vision,
-            commands::trigger_screen_scan,
-            commands::start_mic,
-            commands::stop_mic,
-            commands::download_model_rust, 
+            commands::close_splashscreen,
+            commands::get_system_info,
 
-            // From permissions.rs
+            // Permission Helpers (permissions.rs)
             permissions::request_microphone_permission,
             permissions::request_screen_capture_permission,
             permissions::set_startup_enabled,
             
-            // From main.rs
+            // Setup Marker (main.rs)
             mark_setup_complete
         ])
         .run(tauri::generate_context!())
-        .expect("Critical Error: HackT runtime failed to initialize");
+        .expect("🔥 Critical Error: HackT runtime failed to initialize");
 }
