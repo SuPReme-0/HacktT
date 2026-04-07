@@ -1,48 +1,53 @@
 # =============================================================================
-# HACKT RUNTIME – MASTER GITIGNORE
+# HACKT RUNTIME – MASTER GITIGNORE (Production)
 # Architecture: React (Vite) + Rust (Tauri) + Python (FastAPI)
 # =============================================================================
 
 # -----------------------------------------------------------------------------
 # 1. SENSITIVE DATA & SECRETS (CRITICAL)
 # -----------------------------------------------------------------------------
-# Never commit API keys, tokens, or local environment configs
 .env
-.env.local
-.env.production
+.env.*
+!.env.example
 *.pem
 *.key
 *.cert
-src-tauri/.env
-backend_service/.env
-supabase.json
-config secrets.json
+**/secrets.json
+**/supabase.json
+**/config.json
+# -----------------------------------------------------------------------------
+# 2. AI MODELS & KNOWLEDGE VAULT (LOCAL SOVEREIGNTY)
+# -----------------------------------------------------------------------------
+# Preserve the nested models/ folder structure but ignore the gigabytes of weights
+backend_service/models/*
+!backend_service/models/.gitkeep
 
-# -----------------------------------------------------------------------------
-# 2. AI MODELS & KNOWLEDGE VAULT (LARGE BINARY FILES)
-# -----------------------------------------------------------------------------
-# Models are 4-10GB. Do not commit. Download via script or use Git LFS.
-models/*.gguf
-models/*.bin
-models/*.onnx
-models/*.pt
-models/*.pth
-models/indices/
-models/vault.lance/
-models/vault.graph/
-models/bm25_index.pkl
-models/file_summaries.json
-data/
+# Knowledge Vault & Database files
+backend_service/data/
 *.lance
+*.lance/
 *.graph
+*.graph/
+*.kuzu
+*.wal
+*.log.v*
+**/__index__/**
+_temp_index/
+index.zip
+backend_service/models/bm25_index.pkl
+backend_service/models/file_summaries.json
 
 # -----------------------------------------------------------------------------
 # 3. FRONTEND (React + Vite + TypeScript)
 # -----------------------------------------------------------------------------
 node_modules/
 dist/
+dist-ssr/
 build/
 .vite/
+.eslintcache
+
+# Logs & Lockfiles (Remove lockfiles from here if you prefer reproducible CI/CD builds)
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -54,20 +59,18 @@ pnpm-lock.yaml
 # -----------------------------------------------------------------------------
 # 4. RUST + TAURI (OS Layer)
 # -----------------------------------------------------------------------------
-# Tauri build artifacts
+# Build artifacts
 src-tauri/target/
-src-tauri/binaries/
-src-tauri/*.exe
-src-tauri/*.msi
-src-tauri/*.app
-src-tauri/*.deb
-src-tauri/*.rpm
-src-tauri/app.manifest.bak
-
-# Rust general
 **/target/
+src-tauri/binaries/
+
+# Bundled Python folder (Derived artifact; prevents adding 300MB+ per commit)
+src-tauri/resources/hackt_sovereign_core/
+
+# Rust internals
 **/*.rs.bk
-Cargo.lock
+src-tauri/app.manifest.bak
+Cargo.lock # Remove if you want strict dependency locking in Git
 
 # -----------------------------------------------------------------------------
 # 5. PYTHON BACKEND (AI Core)
@@ -76,11 +79,14 @@ Cargo.lock
 backend_service/build/
 backend_service/dist/
 backend_service/*.spec
-backend_service/*.exe
-backend_service/__pycache__/
-backend_service/**/*.pyc
-backend_service/**/*.pyo
-backend_service/**/*.pyd
+
+# Cache & Compiled Files
+__pycache__/
+**/*.py[cod]
+**/*.pyo
+**/*.pyd
+**/*.so
+**/*.dll
 
 # Virtual Environments
 venv/
@@ -89,23 +95,27 @@ env/
 .env/
 ENV/
 
-# Python testing
+# Python testing & coverage
 .pytest_cache/
 .coverage
 htmlcov/
 .tox/
 
 # -----------------------------------------------------------------------------
-# 6. LOGS & TELEMETRY (Local Dev Only)
+# 6. LOGS & TELEMETRY
 # -----------------------------------------------------------------------------
-# Production logs go to %AppData%, but ignore local dev logs
 logs/
 *.log
 runtime_*.log
 audit trail/
 
+# Local SQLite databases (Prevents overwriting dev states)
+**/*.db
+**/*.db-journal
+**/*.sqlite3
+
 # -----------------------------------------------------------------------------
-# 7. OS & EDITOR FILES
+# 7. OS & IDE / EDITOR
 # -----------------------------------------------------------------------------
 # Windows
 Thumbs.db
@@ -129,28 +139,28 @@ System Volume Information/
 .idea/
 *.swp
 *.swo
-*~
 .project
 .pydevproject
 .settings/
+*.sublime-project
+*.sublime-workspace
 
 # -----------------------------------------------------------------------------
-# 8. BUILD & INSTALLER ARTIFACTS
+# 8. FINAL INSTALLERS & TEMPORARY FILES
 # -----------------------------------------------------------------------------
-# Final installers should not be committed (use Releases tab)
+# Final installers should not be committed (Use GitHub Releases instead)
 *.exe
 *.msi
-*.appimage
-*.dmg
 *.deb
 *.rpm
+*.dmg
+*.app
+*.appimage
 *.AppImage
 bundles/
 installers/
 
-# -----------------------------------------------------------------------------
-# 9. TEMPORARY FILES
-# -----------------------------------------------------------------------------
+# Temporary Files
 tmp/
 temp/
 *.tmp
