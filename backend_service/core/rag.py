@@ -1,12 +1,12 @@
 """
-HackT Sovereign Core - Adaptive Hybrid Retriever (v4.3)
+HackT Sovereign Core - Adaptive Hybrid Retriever (v4.4)
 =======================================================
 Production-sealed RAG implementation featuring:
 - Native LanceDB Hybrid Search (Tantivy FTS + Vector in Rust)
 - Strict Vault-Aware Routing
 - Dynamic Anti-Hallucination Shield
 - Batch Graph Authority Boosting
-- Fixed: LanceDB Hybrid API Syntax & Python Variable Scoping
+- 🛡️ NEW: Self-Healing FTS Manifest Circuit
 """
 
 import numpy as np
@@ -63,6 +63,19 @@ class HybridRetriever:
                         
                 if "vault_chunks" in self._db.table_names():
                     self.vector_table = self._db.open_table("vault_chunks")
+                    
+                    # =========================================================
+                    # 🛡️ CRITICAL FIX: SELF-HEALING FTS CIRCUIT
+                    # =========================================================
+                    # Forces LanceDB to register the inverted index in the manifest.
+                    # This fixes the "Cannot perform full text search" Rust panic.
+                    try:
+                        logger.info("RAG: Verifying/Rebuilding Tantivy FTS Manifest...")
+                        self.vector_table.create_fts_index("text", replace=True)
+                    except Exception as fts_err:
+                        logger.debug(f"RAG: FTS Sync warning (non-fatal): {fts_err}")
+                    # =========================================================
+                    
                     logger.info("RAG: LanceDB Vector & Tantivy FTS Engines ONLINE.")
                 else:
                     logger.warning("RAG: LanceDB table 'vault_chunks' missing. Awaiting data ingestion.")
@@ -117,11 +130,9 @@ class HybridRetriever:
         # ==================================================================
         # 3. NATIVE HYBRID RRF SEARCH 
         # ==================================================================
-        # 🛡️ CRITICAL FIX 1: Initialize variable BEFORE the try block to prevent Scope Errors
         raw_results = [] 
         
         try:
-            # 🛡️ CRITICAL FIX 2: Modern LanceDB API strict syntax for Hybrid Search
             search_obj = self.vector_table.search(query_type="hybrid") \
                                           .vector(query_vector.flatten()) \
                                           .text(query)
@@ -137,7 +148,6 @@ class HybridRetriever:
             logger.error(f"RAG: Native hybrid search failed: {e}")
             logger.info("RAG: Falling back to Vector-only search.")
             
-            # 🛡️ CRITICAL FIX 3: Actually execute the fallback if Tantivy fails
             try:
                 search_obj = self.vector_table.search(query_vector.flatten())
                 if prefilter:
@@ -147,7 +157,7 @@ class HybridRetriever:
                 raw_results = search_obj.to_pandas().to_dict('records')
             except Exception as fallback_e:
                 logger.error(f"RAG: Fallback vector search also failed: {fallback_e}")
-                raw_results = [] # Failsafe
+                raw_results = [] 
         
         # ==================================================================
         # 4. GRAPH BOOST
@@ -204,7 +214,7 @@ class HybridRetriever:
                 return sorted(chunks, key=lambda x: x.get("boosted_score", 0.0), reverse=True)
             
         except Exception as e:
-            logger.debug(f"RAG: Graph batch boost skipped (non-fatal): {e}")
+            logger.debug(f"RAG: Graph batch boost skipped: {e}")
             return chunks
     
     def _pack_context(self, raw_results: List[Dict]) -> List[Dict]:
@@ -227,7 +237,7 @@ class HybridRetriever:
             current_chars += text_len
         
         if not packed_results:
-            logger.info("RAG: No context met threshold requirements. LLM flying blind.")
+            logger.info("RAG: No context met threshold requirements.")
         
         return packed_results
     
@@ -245,7 +255,6 @@ class HybridRetriever:
                     count = len(df)
                 stats[vault_name] = count
         except Exception as e:
-            logger.warning(f"RAG: Failed to get vault stats: {e}")
             for vault_name in self.vault_map:
                 stats[vault_name] = 0
         return stats
