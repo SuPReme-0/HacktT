@@ -21,6 +21,10 @@
       "shell": {
         "all": false,
         "open": true
+      },
+      "protocol": {
+        "asset": true, 
+        "assetScope": ["$HOME/**/*", "$APPDATA/HackT/**/*"]
       }
     },
     "bundle": {
@@ -95,7 +99,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' http://localhost:8000 http://127.0.0.1:8000 ws://localhost:8000 ws://127.0.0.1:8000 'unsafe-inline' 'unsafe-eval'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' http://localhost:8000 http://127.0.0.1:8000 ws://localhost:8000 ws://127.0.0.1:8000;"
+      "csp": "default-src 'self' tauri: http://localhost:8000 http://127.0.0.1:8000 ws://localhost:8000 ws://127.0.0.1:8000 'unsafe-inline' 'unsafe-eval'; img-src 'self' asset: tauri: data:; font-src 'self' data:; connect-src 'self' tauri: http://localhost:8000 http://127.0.0.1:8000 ws://localhost:8000 ws://127.0.0.1:8000;"
     }
   }
 }

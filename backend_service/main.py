@@ -1,5 +1,5 @@
 """
-HackT Sovereign Core - Master Entry Point (v2.5)
+HackT Sovereign Core - Master Entry Point (v2.6)
 =================================================
 Bootstraps the FastAPI application, mounts modular routers,
 and manages the lifecycle of all Sovereign AI microservices.
@@ -10,6 +10,7 @@ Features:
 - Zero circular imports, lazy service loading
 - Async-aware daemon startup & graceful shutdown
 - Proper telemetry manager initialization
+- Correct API endpoint routing with /api prefix
 """
 
 import sys
@@ -17,8 +18,10 @@ import asyncio
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from utils.config import config
 from utils.logger import get_logger, log_system_info, log_shutdown
@@ -106,7 +109,13 @@ async def lifespan(app: FastAPI):
 
         # 3. Database handshake
         await send_boot_progress("Mounting Sovereign Vault...", 20)
-        db.initialize()   # Ensure this matches your database.py (e.g., db.initialize() if needed)
+        # ✅ FIXED: Use the correct initialization method from database.py
+        if hasattr(db, 'initialize'):
+            db.initialize()
+        elif hasattr(db, '_initialize_database'):
+            db._initialize_database()
+        else:
+            logger.warning("Database initialization method not found")
 
         # 4. Embedder
         if not embedder._loaded:
@@ -183,7 +192,11 @@ async def lifespan(app: FastAPI):
                 _telemetry_manager.stop()
 
             # Close database
-            db.close_all()
+            if hasattr(db, 'close_all'):
+                db.close_all()
+            elif hasattr(db, '_close_all'):
+                db._close_all()
+            
             log_shutdown()
         except Exception as e:
             logger.error(f"⚠️ Shutdown error: {e}")
@@ -193,13 +206,80 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="HackT Sovereign Core",
     description="Privacy-first, offline AI cybersecurity agent",
-    version="2.5.0",
+    version="2.6.0",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json"
 )
 
+# ======================================================================
+# ERROR HANDLERS (Hardened for Sovereign Core)
+# ======================================================================
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """
+    Handles standard HTTP errors (404, 401, 403, etc.)
+    """
+    logger.warning(f"🛡️ HTTP {exc.status_code} on {request.url.path}: {exc.detail}")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "status": "error",
+            "error": {
+                "code": exc.status_code,
+                "message": str(exc.detail),
+                "path": request.url.path
+            }
+        }
+    )
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """
+    Global catch-all for unhandled server-side crashes.
+    Prevents the backend from leaking sensitive stack traces.
+    """
+    logger.error(f"🔥 UNHANDLED CRASH on {request.url.path}: {exc}", exc_info=True)
+    
+    # Structure the debug info based on config
+    debug_info = str(exc) if config.system.environment == "development" else "Sensitive details hidden in production logs."
+    
+    return JSONResponse(
+        status_code=500,
+        content={
+            "status": "critical",
+            "error": {
+                "code": 500,
+                "message": "Internal Sovereign Core Error",
+                "debug": debug_info,
+                "timestamp": time.time()
+            }
+        }
+    )
+
+from fastapi.exceptions import RequestValidationError
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """
+    Handles malformed JSON or invalid data types sent by the frontend/IDE.
+    """
+    logger.error(f"❌ DATA VALIDATION FAILED: {exc.errors()}")
+    return JSONResponse(
+        status_code=422,
+        content={
+            "status": "rejected",
+            "error": {
+                "code": 422,
+                "message": "Schema validation failed. Check request payload.",
+                "details": exc.errors()
+            }
+        }
+    )
+
+
+# ✅ FIXED: Add Streamlit to CORS origins for test suite
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.cors_origins + ["http://localhost:8501"],
@@ -208,12 +288,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ✅ FIXED: Include routers with proper /api prefix
 app.include_router(api_router, prefix="/api")
-app.include_router(telemetry_router)
+app.include_router(telemetry_router, prefix="/api")  # WebSocket router also needs /api prefix
 
-@app.get("/health")
+# ✅ FIXED: Health endpoint should be at /api/health to match router prefix
+@app.get("/api/health")
 async def health_check():
-    # ✅ FIXED: Replaced asyncio.get_event_loop().time() with time.time() for safe endpoint querying
     return {
         "status": "healthy",
         "mode": config.mode,

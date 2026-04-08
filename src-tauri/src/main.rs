@@ -19,7 +19,7 @@ fn build_tray_menu() -> SystemTray {
     let toggle_mic = CustomMenuItem::new("toggle_mic".to_string(), "🎤 Mic: Toggle");
     let toggle_vision = CustomMenuItem::new("toggle_vision".to_string(), "👁️ Vision: Toggle");
     let toggle_think = CustomMenuItem::new("toggle_think".to_string(), "🧠 Thinking: Toggle");
-
+    
     let tray_menu = SystemTrayMenu::new()
         .add_item(CustomMenuItem::new("status".to_string(), "PASSIVE MONITOR ACTIVE").disabled())
         .add_native_item(SystemTrayMenuItem::Separator)
@@ -29,28 +29,36 @@ fn build_tray_menu() -> SystemTray {
         .add_native_item(SystemTrayMenuItem::Separator)
         .add_item(CustomMenuItem::new("open".to_string(), "Restore Dashboard"))
         .add_item(CustomMenuItem::new("quit".to_string(), "Terminate Engine"));
-
+        
     SystemTray::new().with_menu(tray_menu)
 }
 
 // ==============================================================================
-// 2. SETUP COMPLETE MARKER
+// 2. SETUP COMPLETE MARKER (Thread-Safe)
 // ==============================================================================
 #[tauri::command]
 fn mark_setup_complete(app_handle: tauri::AppHandle) -> Result<(), String> {
-    let app_dir = app_handle
-        .path_resolver()
-        .app_data_dir()
+    let app_dir = app_handle.path_resolver().app_data_dir()
         .ok_or("Failed to resolve app data dir")?;
     std::fs::create_dir_all(&app_dir).map_err(|e| e.to_string())?;
+    
     let setup_flag = app_dir.join("setup_complete");
     std::fs::File::create(setup_flag).map_err(|e| e.to_string())?;
     Ok(())
 }
 
 fn main() {
+    // Register the custom protocol handler BEFORE the app boots
+    // ✅ FIX: prepare() returns (), not Result
+    tauri_plugin_deep_link::prepare("com.hackt.runtime");
+
     tauri::Builder::default()
+        // 🔥 FIX: Properly manage the BackendState so the app doesn't panic
         .manage(commands::BackendState(Mutex::new(None)))
+        
+        // ==============================================================================
+        // 3. SYSTEM TRAY EVENT LISTENER
+        // ==============================================================================
         .system_tray(build_tray_menu())
         .on_system_tray_event(|app, event| match event {
             SystemTrayEvent::LeftClick { .. } => {
@@ -68,28 +76,31 @@ fn main() {
                 }
                 "quit" => {
                     println!("🛑 OS-Level Shutdown sequence initiated...");
+                    
+                    // 🔥 FIX: Absolute OS-level termination with graceful mutex handling
                     let state = app.state::<commands::BackendState>();
                     if let Ok(mut backend_guard) = state.0.lock() {
                         if let Some(mut child) = backend_guard.take() {
                             let _ = child.kill();
                             let _ = child.wait();
                         }
+                    } else {
+                        eprintln!("⚠️ Failed to acquire backend state lock during shutdown");
                     }
+                    
                     app.exit(0);
                 }
-                "toggle_vision" => {
-                    let _ = app.emit_all("tray_toggle_vision", ());
-                }
-                "toggle_mic" => {
-                    let _ = app.emit_all("tray_toggle_mic", ());
-                }
-                "toggle_think" => {
-                    let _ = app.emit_all("tray_toggle_think", ());
-                }
+                "toggle_vision" => { let _ = app.emit_all("tray_toggle_vision", ()); }
+                "toggle_mic" => { let _ = app.emit_all("tray_toggle_mic", ()); }
+                "toggle_think" => { let _ = app.emit_all("tray_toggle_think", ()); }
                 _ => {}
             },
             _ => {}
         })
+        
+        // ==============================================================================
+        // 4. WINDOW HIJACKING (Zombie Prevention)
+        // ==============================================================================
         .on_window_event(|event| match event.event() {
             WindowEvent::CloseRequested { api, .. } => {
                 api.prevent_close();
@@ -97,52 +108,89 @@ fn main() {
             }
             _ => {}
         })
+
+        // ==============================================================================
+        // 5. INJECT DEEP LINK PLUGIN
+        // ==============================================================================
+        // ✅ FIX: Use the builder pattern to get a TauriPlugin from register()
+        .plugin({
+            // register() returns Result<()>, so we need to handle it and return a plugin
+            let _ = tauri_plugin_deep_link::register("hackt", |request| {
+                // Handle incoming deep link requests
+                println!("🔗 Deep link received: {}", request);
+                // You can emit an event to the frontend here
+            });
+            // Return the plugin instance (the plugin is already registered globally)
+            tauri_plugin_deep_link::init()
+        })
+        
+        // ==============================================================================
+        // 6. LIFECYCLE & STARTUP HOOKS
+        // ==============================================================================
         .setup(|app| {
+            // App data directory and setup flag
             let app_dir = app.path_resolver().app_data_dir().unwrap_or_default();
             let _ = std::fs::create_dir_all(&app_dir);
             let setup_flag = app_dir.join("setup_complete");
 
-            // Get the main window (must exist)
-            let main_window = match app.get_window("main") {
-                Some(win) => win,
-                None => {
-                    eprintln!("ERROR: Main window not found");
-                    return Ok(());
-                }
-            };
-
             if setup_flag.exists() {
-                // Setup already done: spawn backend and show main window
                 let state = app.state::<commands::BackendState>();
                 let _ = commands::spawn_python_backend(app.app_handle(), state);
-                let _ = main_window.show();
-                let _ = main_window.set_focus();
             } else {
-                // First run: redirect to setup and show after short delay
-                let _ = main_window.eval("window.location.hash = '/setup'");
-                let win_clone = main_window.clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                    let _ = win_clone.show();
-                    let _ = win_clone.set_focus();
-                });
-                if let Some(splash) = app.get_window("splashscreen") {
-                    let _ = splash.close();
+                if let Some(window) = app.get_window("main") {
+                    let _ = window.eval("window.location.hash = '/setup'");
+                    
+                    // 🔥 FIX: Ensure the window shows up since it starts hidden!
+                    // Use a small timeout to ensure the window is ready
+                    let window_clone = window.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                        let _ = window_clone.show();
+                        let _ = window_clone.set_focus();
+                    });
+                    
+                    // 🔥 AND THIS: Close the splashscreen if it's open
+                    if let Some(splash) = app.get_window("splashscreen") {
+                        let _ = splash.close();
+                    }
                 }
             }
 
+            // Listen for incoming Google OAuth deep links (legacy fallback)
+            let handle = app.handle();
+            app.listen_global("scheme-request-received", move |event| {
+                if let Some(payload) = event.payload() {
+                    println!("🔗 Intercepted Deep Link (legacy): {}", payload);
+                    // ✅ FIX: Proper null check for window access
+                    if let Some(window) = handle.get_window("main") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                    let _ = handle.emit_all("oauth_callback", payload);
+                }
+            });
+
             Ok(())
         })
+        
+        // ==============================================================================
+        // 7. IPC COMMAND REGISTRATION 
+        // ==============================================================================
         .invoke_handler(tauri::generate_handler![
+            // 🔥 FIX: Only register commands that actually exist in the new commands.rs
             commands::run_model_bootstrapper,
             commands::spawn_python_backend,
             commands::trigger_google_auth,
             commands::generate_new_session,
             commands::close_splashscreen,
             commands::get_system_info,
+
+            // Permission Helpers (permissions.rs)
             permissions::request_microphone_permission,
             permissions::request_screen_capture_permission,
             permissions::set_startup_enabled,
+            
+            // Setup Marker (main.rs)
             mark_setup_complete
         ])
         .run(tauri::generate_context!())

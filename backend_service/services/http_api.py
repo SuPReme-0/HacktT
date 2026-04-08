@@ -1,292 +1,363 @@
 """
-HackT Sovereign Core - HTTP API Service Module (v5.0)
-======================================================
-The Unified REST Interface for React/Tauri.
+HackT Sovereign Core - HTTP API Router
+======================================
+Defines all REST API endpoints for frontend communication.
+
 Features:
-- SSE Chat Streaming (Vault-Aware)
-- System Health & Control
-- Manual Threat Scanning
-- Zero Circular Imports
-- Background Task Delegation
+- SSE streaming for chat responses
+- Audio transcription (STT) and synthesis (TTS)
+- Threat scanning and code diff broadcasting
+- System configuration and health checks
+- Proper error handling and CORS support
 """
 
 import asyncio
 import json
-import logging
-import re
 import time
-from pathlib import Path
-from typing import AsyncGenerator, Dict, List, Optional, Any
+from typing import AsyncGenerator, Optional, Dict, Any, List
+from fastapi import APIRouter, HTTPException, Request, BackgroundTasks, Depends
+from fastapi.responses import StreamingResponse, JSONResponse
+from pydantic import BaseModel, Field, validator
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Request
-from fastapi.responses import StreamingResponse, Response, JSONResponse
-from pydantic import BaseModel, Field, field_validator, ConfigDict
-import numpy as np
-
-from utils.logger import get_logger
 from utils.config import config
+from utils.logger import get_logger
 from core.engine import engine
 from core.embedder import embedder
 from core.rag import retriever
 from core.memory import vram_guard
-from core.database import db
-from prompts.orchestrator import orchestrator
+from services.websocket import telemetry_manager
+from services.audio import stt_service, tts_service
+from services.threat_scanner import threat_scanner
 
-# Lazy imports to prevent boot-time circular dependencies
-try:
-    from services.websocket import telemetry_manager
-except ImportError:
-    telemetry_manager = None
+logger = get_logger("hackt.api")
 
-logger = get_logger("hackt.services.http_api")
-api_router = APIRouter(prefix="/api")
+# Create router with prefix
+api_router = APIRouter()
 
 # ======================================================================
-# Request/Response Models
+# REQUEST/RESPONSE MODELS
 # ======================================================================
 
 class ChatRequest(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True)
+    prompt: str = Field(..., min_length=1, max_length=4000, description="User query or command")
+    mode: str = Field(default="active", pattern="^(active|passive)$", description="Agent operation mode")
+    query_type: str = Field(default="chat", pattern="^(chat|voice|audit|code)$", description="Type of query")
+    session_id: str = Field(..., min_length=1, description="Unique session identifier")
+    context: Optional[Dict[str, Any]] = Field(default=None, description="Optional context data")
     
-    prompt: str = Field(..., min_length=1, max_length=2000)
-    vector: Optional[List[float]] = Field(default=None, min_length=256, max_length=768)
-    mode: str = Field(default="active", pattern="^(active|passive)$")
-    session_id: str = Field(default="default_session", min_length=1, max_length=64)
-    query_type: str = Field(default="chat", pattern="^(chat|voice|audit|idle)$")
-    project_context: Optional[str] = Field(default=None, max_length=4000)
-    
-    @field_validator("prompt")
-    @classmethod
-    def sanitize_prompt(cls, v: str) -> str:
-        """Remove potential prompt injection patterns."""
-        dangerous_prefixes = ["ignore previous", "system prompt", "you are now", "disregard"]
-        v_lower = v.lower()
-        for prefix in dangerous_prefixes:
-            if prefix in v_lower:
-                logger.warning(f"Prompt injection attempt detected: {v[:100]}")
-                return v  # Log but process
+    @validator('prompt')
+    def validate_prompt(cls, v):
+        if not v.strip():
+            raise ValueError("Prompt cannot be empty")
         return v.strip()
 
-class ChatToken(BaseModel):
+class ChatResponse(BaseModel):
     token: str
-    status: str = "generating" 
-    citations: List[str] = Field(default_factory=list)
-    threat_level: Optional[str] = None
-    kv_cache_usage: float = Field(default=0.0, ge=0.0, le=1.0)
-    timestamp: float = Field(default_factory=time.time)
+    done: bool = False
+    metadata: Optional[Dict[str, Any]] = None
 
 class ThreatScanRequest(BaseModel):
-    content: str = Field(..., min_length=1, max_length=8000)
-    content_type: str = Field(default="code", pattern="^(code|text|screen_ocr|terminal_log)$")
+    content: str = Field(..., min_length=1, description="Code or text content to scan")
+    content_type: str = Field(default="code", pattern="^(code|text|url)$", description="Type of content")
+    source: Optional[str] = Field(default=None, description="Source file or URL")
+
+class ThreatScanResponse(BaseModel):
+    is_threat: bool
+    threat_level: Optional[str] = None
+    description: Optional[str] = None
+    suggested_fix: Optional[str] = None
+    confidence: float = Field(ge=0.0, le=1.0)
+
+class TTSRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=1000, description="Text to synthesize")
+    voice: Optional[str] = Field(default=None, description="Voice model identifier")
+    speed: float = Field(default=1.0, ge=0.5, le=2.0, description="Speech speed multiplier")
+
+class HealthResponse(BaseModel):
+    status: str
+    mode: str
+    llm_loaded: bool
+    vram_usage_gb: float
+    timestamp: float
+    version: str = "2.4.0"
+
+class SystemModeRequest(BaseModel):
+    mode: str = Field(..., pattern="^(active|passive)$", description="Target operation mode")
+
+class IDEConfigRequest(BaseModel):
+    enabled: bool
+    port: int = Field(ge=1024, le=65535, description="Port for IDE integration")
 
 # ======================================================================
-# Utility Functions
+# HELPER FUNCTIONS
 # ======================================================================
 
-def _format_citations(chunks: List[Dict]) -> List[str]:
-    """Format RAG chunks into citation strings for frontend display."""
-    citations = []
-    for chunk in chunks[:3]:  # Limit to top 3 for UI clarity
-        source = chunk.get("source", "unknown")
-        vault_id = chunk.get("vault_id", 0)
-        vault_name = {1: "Library", 2: "Laboratory", 3: "Showroom"}.get(vault_id, "Unknown")
-        citations.append(f"[{vault_name}] {source}")
-    return citations
-
-def _inject_history(base_prompt: str, history: List[Dict]) -> str:
-    """Injects historical turns cleanly into the ChatML structure."""
-    if not history:
-        return base_prompt
-    
-    # Split prompt at the first user message marker to insert history BEFORE current query
-    parts = base_prompt.split("<|im_start|>user\n")
-    if len(parts) < 2:
-        return base_prompt
-    
-    history_str = ""
-    for msg in history:
-        role = msg.get("role", "user")
-        content = msg.get("content", "")
-        history_str += f"<|im_start|>{role}\n{content}<|im_end|>\n"
-    
-    return f"{parts[0]}{history_str}<|im_start|>user\n{parts[1]}"
-
-# ======================================================================
-# Chat Streaming Endpoint (Server-Sent Events)
-# ======================================================================
-
-@api_router.post("/chat")
-async def chat_stream(request: ChatRequest, background_tasks: BackgroundTasks) -> StreamingResponse:
+async def generate_chat_stream(
+    prompt: str,
+    mode: str,
+    session_id: str,
+    query_type: str,
+    context: Optional[Dict[str, Any]] = None
+) -> AsyncGenerator[str, None]:
     """
-    Unified Chat Endpoint: Classifies -> Embeds -> Retrieves -> Routes -> Streams -> Saves
+    Generate streaming chat response using SSE format.
+    Yields JSON-encoded tokens with proper SSE formatting.
     """
-    # 0. Reset Idle Timer
     try:
-        from services.idle_manager import idle_manager
-        idle_manager.record_activity()
-    except ImportError:
-        pass 
-    
-    # 1. Engine readiness check
-    if not engine or not embedder or not retriever:
-        raise HTTPException(503, "Sovereign Core not fully initialized.")
-    
-    if not engine.llm and not engine.load_llm():
-        raise HTTPException(503, "VRAM exhausted. Cannot load LLM.")
-    
-    # 2. 🚀 VAULT INTENT CLASSIFICATION (The Missing Link)
-    target_vault = orchestrator.classify_vault_intent(request.prompt)
-    
-    # 3. 🚀 ASYNC RAG PIPELINE (Vault-Aware)
-    try:
-        if request.vector is None:
-            query_vector = await asyncio.to_thread(embedder.encode, request.prompt)
-        else:
-            query_vector = np.array(request.vector)
+        # Prepare context for RAG retrieval
+        query_vector = await embedder.encode(prompt) if embedder._loaded else None
         
-        retrieved_chunks = await asyncio.to_thread(
-            retriever.retrieve,
-            query=request.prompt,
-            query_vector=query_vector,
-            mode=request.mode,
-            query_type=request.query_type,
-            target_vault=target_vault  # 🔥 Vault Routing Applied
-        )
-        citations = _format_citations(retrieved_chunks)
-    except Exception as e:
-        logger.error(f"RAG pipeline failed: {e}")
+        # Retrieve relevant context from vault
         retrieved_chunks = []
-        citations = []
-    
-    # 4. 🚀 DYNAMIC PROMPT ROUTING
-    system_state = {"Project Context": request.project_context} if request.project_context else None
-    
-    route_data = orchestrator.route(
-        query=request.prompt,
-        mode=request.mode,
-        query_type=request.query_type,
-        retrieved_chunks=retrieved_chunks,
-        system_state=system_state
-    )
-    
-    # 5. 🚀 HISTORY INJECTION & OOM PROTECTION
-    try:
-        history = await asyncio.to_thread(db.get_session_history, request.session_id, max_turns=8)
+        if query_vector and retriever._loaded:
+            retrieved_chunks = await retriever.retrieve(
+                query=prompt,
+                query_vector=query_vector,
+                mode=mode,
+                query_type=query_type
+            )
+        
+        # Format prompt with retrieved context
+        formatted_prompt = prompt
+        if retrieved_chunks:
+            context_text = "\n\n".join([chunk["text"] for chunk in retrieved_chunks[:3]])
+            formatted_prompt = f"Context:\n{context_text}\n\nQuery: {prompt}"
+        
+        # Generate response using LLM with streaming
+        async for chunk in engine.generate_stream(
+            prompt=formatted_prompt,
+            max_tokens=512,
+            temperature=0.3 if mode == "passive" else 0.7,
+            session_id=session_id
+        ):
+            # Format as SSE event
+            response = ChatResponse(token=chunk, done=False)
+            yield f" {json.dumps(response.dict())}\n\n"
+            # Small delay to prevent overwhelming the client
+            await asyncio.sleep(0.01)
+        
+        # Send final done event
+        yield f" {json.dumps({'done': True})}\n\n"
+        
     except Exception as e:
-        logger.warning(f"History fetch failed: {e}")
-        history = []
-    
-    final_prompt = _inject_history(route_data["prompt"], history)
-    
-    # Context Window Safety Guard (Prunes history if token count gets dangerously high)
-    if len(final_prompt) > 12000:
-        logger.warning("Context approaching VRAM limit. Pruning history.")
-        final_prompt = _inject_history(route_data["prompt"], history[-2:])  # Keep only last 2 turns
-
-    # 6. 🚀 SSE GENERATOR
-    async def sse_generator() -> AsyncGenerator[str, None]:
-        full_response = ""
-        try:
-            for token in engine.stream_chat(prompt=final_prompt, max_tokens=route_data["max_tokens"]):
-                full_response += token
-                yield f"data: {ChatToken(token=token, citations=citations).model_dump_json()}\n\n"
-                await asyncio.sleep(0.001) 
-                
-            yield f"data: {ChatToken(token='', status='done').model_dump_json()}\n\n"
-            
-        except Exception as e:
-            logger.error(f"Streaming error: {e}")
-            yield f"data: {ChatToken(token='[ERROR]', status='error').model_dump_json()}\n\n"
-        finally:
-            if len(full_response) > 5:
-                # 🚀 Delegate SQLite save to FastAPI's non-blocking background workers
-                background_tasks.add_task(db.save_turn, request.session_id, request.prompt, full_response)
-
-    return StreamingResponse(sse_generator(), media_type="text/event-stream", background=background_tasks)
+        logger.error(f"Chat stream generation failed: {e}")
+        # Send error event
+        yield f" {json.dumps({'error': str(e), 'done': True})}\n\n"
 
 # ======================================================================
-# Threat Scanning Endpoint
+# API ENDPOINTS
 # ======================================================================
 
-@api_router.post("/threat/scan")
-async def manual_threat_scan(request: ThreatScanRequest):
-    """
-    Manual threat scan endpoint for React UI triggers.
-    Returns full assessment including suggested_fix for Diff Modal.
-    """
-    from services.threat_scanner import threat_scanner
-    
-    if not threat_scanner:
-        raise HTTPException(503, "Threat Scanner not initialized.")
-    
-    result = await threat_scanner.scan_now(
-        content=request.content,
-        source=request.content_type
-    )
-    
-    return JSONResponse(content=result)
-
-# ======================================================================
-# System & Health Endpoints
-# ======================================================================
-
-@api_router.get("/health")
+@api_router.get("/health", response_model=HealthResponse)
 async def health_check():
-    """Health check endpoint for React polling."""
-    vram_usage = 0.0
-    if vram_guard:
-        vram_usage = vram_guard.get_usage_stats().get("used_gb", 0.0)
+    """
+    Health check endpoint for load balancers and frontend polling.
+    Returns system status, VRAM usage, and LLM load state.
+    """
+    return HealthResponse(
+        status="healthy",
+        mode=config.mode,
+        llm_loaded=engine.llm is not None,
+        vram_usage_gb=vram_guard.get_usage_stats().get("used_gb", 0.0),
+        timestamp=time.time()
+    )
 
-    return {
-        "status": "healthy",
-        "mode": config.mode,
-        "rag_status": retriever.health_check(),
-        "llm_loaded": engine.llm is not None if engine else False,
-        "vram_usage_gb": vram_usage,
-        "timestamp": time.time(),
-    }
+@api_router.post("/api/chat")
+async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks):
+    """
+    Chat endpoint with Server-Sent Events (SSE) streaming.
+    
+    Accepts user prompts and streams AI responses token-by-token.
+    Supports active/passive modes and different query types.
+    
+    SSE Format:
+     {"token": "chunk", "done": false}
+     {"done": true}
+    """
+    try:
+        return StreamingResponse(
+            generate_chat_stream(
+                prompt=request.prompt,
+                mode=request.mode,
+                session_id=request.session_id,
+                query_type=request.query_type,
+                context=request.context
+            ),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",  # Disable Nginx buffering
+            }
+        )
+    except Exception as e:
+        logger.error(f"Chat endpoint failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
 
-@api_router.post("/system/mode")
-async def switch_mode(request: Dict):
-    """Switch between Active/Passive modes."""
-    mode = request.get("mode", "").lower()
-    if mode not in ["active", "passive"]:
-        raise HTTPException(400, "Invalid mode. Must be 'active' or 'passive'")
+@api_router.post("/api/audio/transcribe")
+async def transcribe_audio(request: Request):
+    """
+    Speech-to-Text endpoint.
     
-    config.mode = mode
+    Accepts raw audio bytes in request body and returns transcribed text.
+    Supports WAV, MP3, and other common audio formats via Faster-Whisper.
+    """
+    try:
+        # Get raw audio bytes from request body
+        audio_bytes = await request.body()
+        
+        if not audio_bytes:
+            raise HTTPException(status_code=400, detail="No audio data received")
+        
+        # Transcribe using STT service
+        text = await stt_service.transcribe_audio(audio_bytes)
+        
+        return {"text": text}
+        
+    except Exception as e:
+        logger.error(f"STT transcription failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+
+@api_router.post("/api/tts")
+async def synthesize_speech(request: TTSRequest):
+    """
+    Text-to-Speech endpoint.
     
-    # Coordinate background daemons
-    if mode == "passive":
-        logger.info("Passive mode: Screen monitoring enabled")
-    else:
-        logger.info("Active mode: Passive daemons suspended")
+    Accepts text and returns synthesized audio as WAV bytes.
+    Supports voice selection and speed control via Piper TTS.
+    """
+    try:
+        # Synthesize speech using TTS service
+        audio_bytes = await tts_service.synthesize_speech(
+            text=request.text,
+            voice=request.voice,
+            speed=request.speed
+        )
+        
+        return Response(
+            content=audio_bytes,
+            media_type="audio/wav",
+            headers={
+                "Content-Disposition": f'attachment; filename="tts_output.wav"',
+                "Cache-Control": "no-cache"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"TTS synthesis failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Speech synthesis failed: {str(e)}")
+
+@api_router.post("/api/threat/scan", response_model=ThreatScanResponse)
+async def scan_threat(request: ThreatScanRequest):
+    """
+    Threat scanning endpoint.
     
-    if telemetry_manager:
-        await telemetry_manager.broadcast_telemetry({
-            "type": "mode_changed",
-            "mode": mode,
+    Analyzes code or text for security vulnerabilities using RAG + LLM.
+    Returns threat assessment with suggested fixes for critical issues.
+    """
+    try:
+        # Perform threat analysis
+        result = await threat_scanner.analyze_content(
+            content=request.content,
+            content_type=request.content_type,
+            source=request.source
+        )
+        
+        return ThreatScanResponse(**result)
+        
+    except Exception as e:
+        logger.error(f"Threat scan failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Threat scan failed: {str(e)}")
+
+@api_router.post("/api/system/mode")
+async def toggle_system_mode(request: SystemModeRequest):
+    """
+    Toggle system operation mode between active and passive.
+    
+    Active mode: Chat-only, minimal resource usage.
+    Passive mode: Full surveillance with OCR, code watching, threat scanning.
+    """
+    try:
+        # Update config mode
+        old_mode = config.mode
+        config.mode = request.mode
+        
+        # Notify services of mode change
+        if request.mode == "passive":
+            # Start passive mode services
+            threat_scanner.start()
+            # ... start other passive services ...
+        else:
+            # Stop passive mode services
+            threat_scanner.stop()
+            # ... stop other passive services ...
+        
+        logger.info(f"System mode changed: {old_mode} → {request.mode}")
+        return {"mode": request.mode, "success": True}
+        
+    except Exception as e:
+        logger.error(f"Mode toggle failed: {e}")
+        # Revert on failure
+        config.mode = old_mode
+        raise HTTPException(status_code=500, detail=f"Mode toggle failed: {str(e)}")
+
+@api_router.post("/api/config/ide")
+async def configure_ide(request: IDEConfigRequest):
+    """
+    Configure IDE integration settings.
+    
+    Enables/disables IDE socket listener and sets port for code streaming.
+    """
+    try:
+        # Update IDE config
+        from services.port_listeners import integration_manager
+        
+        if request.enabled:
+            await integration_manager.start_ide_socket(port=request.port)
+        else:
+            await integration_manager.stop_ide_socket()
+        
+        logger.info(f"IDE integration {'enabled' if request.enabled else 'disabled'} on port {request.port}")
+        return {"enabled": request.enabled, "port": request.port, "success": True}
+        
+    except Exception as e:
+        logger.error(f"IDE config failed: {e}")
+        raise HTTPException(status_code=500, detail=f"IDE configuration failed: {str(e)}")
+
+@api_router.get("/api/system/info")
+async def get_system_info():
+    """
+    Get detailed system information for frontend diagnostics.
+    
+    Returns VRAM stats, loaded models, active services, and configuration.
+    """
+    try:
+        vram_stats = vram_guard.get_usage_stats()
+        
+        return {
+            "vram": vram_stats,
+            "models": {
+                "llm": engine.llm is not None,
+                "embedder": embedder._loaded,
+                "retriever": retriever._loaded
+            },
+            "services": {
+                "websocket": telemetry_manager.active_connections > 0,
+                "threat_scanner": threat_scanner.is_running,
+                "stt": stt_service._loaded,
+                "tts": tts_service._loaded
+            },
+            "config": {
+                "mode": config.mode,
+                "ports": {
+                    "ide": config.services.ide_listener_port,
+                    "browser": config.services.browser_listener_port
+                }
+            },
             "timestamp": time.time()
-        }, target="all")
-    
-    return {"status": "success", "mode": mode}
+        }
+        
+    except Exception as e:
+        logger.error(f"System info failed: {e}")
+        raise HTTPException(status_code=500, detail=f"System info failed: {str(e)}")
 
-@api_router.post("/system/shutdown")
-async def shutdown(background_tasks: BackgroundTasks):
-    """Nuclear kill switch from Tauri tray or React."""
-    async def _perform_shutdown():
-        logger.info("🔥 Graceful shutdown initiated")
-        if telemetry_manager:
-            telemetry_manager.stop()
-        if engine:
-            engine.unload_llm()
-        import sys
-        sys.exit(0)
-    
-    background_tasks.add_task(_perform_shutdown)
-    return {"status": "shutdown_queued", "message": "Core is shutting down gracefully"}
-
-@api_router.get("/system/sessions")
-async def get_sessions():
-    """Fetch all chat sessions for React sidebar."""
-    sessions = await asyncio.to_thread(db.get_all_sessions)
-    return {"sessions": sessions}

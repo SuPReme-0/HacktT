@@ -11,6 +11,8 @@ Features:
 - Streamlit session state persistence for test history
 - Cyberpunk-themed UI with animated status indicators
 - Proper SSE parsing and audio streaming handling
+- Fixed pandas DataFrame lambda error
+- Updated Streamlit API for future compatibility
 """
 
 import streamlit as st
@@ -246,8 +248,8 @@ with st.sidebar:
     
     st.markdown("---")
     st.markdown("### ⚡ Test Controls")
-    run_all    = st.button("▶  Run ALL Tests", type="primary", use_container_width=True)
-    clear_results = st.button("🗑️ Clear Results", use_container_width=True)
+    run_all    = st.button("▶  Run ALL Tests", type="primary", width="stretch")  # ✅ FIX: use width='stretch'
+    clear_results = st.button("🗑️ Clear Results", width="stretch")  # ✅ FIX: use width='stretch'
     run_danger = st.checkbox("Include shutdown test ⚠️", value=False)
     
     if clear_results:
@@ -420,7 +422,7 @@ with tabs[0]:
         st.markdown("---")
         
         st.markdown("**1. Voice Input (Server Mic)**")
-        if st.button("🎙️ Trigger Backend STT (Remote Control)", use_container_width=True, key="stt_btn"):
+        if st.button("🎙️ Trigger Backend STT (Remote Control)", width="stretch", key="stt_btn"):  # ✅ FIX: use width='stretch'
             with st.spinner("Server is listening... speak into your PC mic!"):
                 try:
                     start = time.time()
@@ -447,7 +449,7 @@ with tabs[0]:
         )
         
         st.markdown("---")
-        run_sim = st.button("🚀 Execute Loop", type="primary", use_container_width=True, key="run_sim")
+        run_sim = st.button("🚀 Execute Loop", type="primary", width="stretch", key="run_sim")  # ✅ FIX: use width='stretch'
 
     with col2:
         st.markdown("**Live Telemetry & Output**")
@@ -748,7 +750,7 @@ with tabs[6]:
             showlegend=True,
             height=300
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")  # ✅ FIX: use width='stretch'
     
     # Latency Chart (if Plotly available)
     if PLOTLY_AVAILABLE and st.session_state.latency_history:
@@ -768,7 +770,7 @@ with tabs[6]:
             height=250,
             yaxis=dict(range=[0, max(st.session_state.latency_history) * 1.2])
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")  # ✅ FIX: use width='stretch'
     
     # Detailed Test Results Table
     st.markdown("### 📋 Detailed Test Results")
@@ -778,8 +780,16 @@ with tabs[6]:
         import pandas as pd
         df = pd.DataFrame(st.session_state.test_results)
         
-        # Format for display
-        df['Status'] = df['passed'].apply(lambda x: '✅ PASS' if x else ('⚠️ SKIP' if df.loc[df['passed'] == x].get('skipped', False) else '❌ FAIL'))
+        # ✅ FIX: Proper lambda function to avoid Series ambiguity error
+        def get_status(row):
+            if row['passed']:
+                return '✅ PASS'
+            elif row.get('skipped', False):
+                return '⚠️ SKIP'
+            else:
+                return '❌ FAIL'
+        
+        df['Status'] = df.apply(get_status, axis=1)
         df['Latency'] = df['latency_ms'].apply(lambda x: f"{x:.0f}ms" if x is not None else "N/A")
         
         # Display table with custom styling
@@ -793,7 +803,7 @@ with tabs[6]:
                 "timestamp": "Timestamp"
             },
             hide_index=True,
-            use_container_width=True
+            width="stretch"  # ✅ FIX: use width='stretch'
         )
     else:
         st.info("No tests run yet. Click 'Run ALL Tests' or individual test buttons to start.")
@@ -805,7 +815,7 @@ with tabs[6]:
         
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("Download JSON Report", use_container_width=True):
+            if st.button("Download JSON Report", width="stretch"):  # ✅ FIX: use width='stretch'
                 report = {
                     "timestamp": datetime.now().isoformat(),
                     "total_tests": total_tests,
@@ -820,11 +830,11 @@ with tabs[6]:
                     data=json.dumps(report, indent=2),
                     file_name=f"hackt_test_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
                     mime="application/json",
-                    use_container_width=True
+                    width="stretch"  # ✅ FIX: use width='stretch'
                 )
         
         with col2:
-            if st.button("Download CSV Report", use_container_width=True):
+            if st.button("Download CSV Report", width="stretch"):  # ✅ FIX: use width='stretch'
                 import pandas as pd
                 df = pd.DataFrame(st.session_state.test_results)
                 csv = df.to_csv(index=False)
@@ -833,7 +843,7 @@ with tabs[6]:
                     data=csv,
                     file_name=f"hackt_test_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                     mime="text/csv",
-                    use_container_width=True
+                    width="stretch"  # ✅ FIX: use width='stretch'
                 )
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -842,7 +852,7 @@ with tabs[6]:
 st.markdown("---")
 st.markdown(
     '<div style="text-align: center; color: #666; font-size: 12px; padding: 20px;">'
-    'HackT Sovereign Core Test Suite v3.0 • '
+    'HackT Sovereign Core Test Suite v3.1 • '
     f'Last Run: {st.session_state.last_test_run or "Never"}'
     '</div>',
     unsafe_allow_html=True

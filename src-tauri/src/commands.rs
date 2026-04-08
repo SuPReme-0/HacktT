@@ -1,4 +1,4 @@
-use tauri::Manager;
+use tauri::{Manager, Window};
 use std::process::{Command, Stdio, Child};
 use std::io::{BufRead, BufReader};
 use std::thread;
@@ -31,10 +31,11 @@ pub struct BackendLog {
 // ==============================================================================
 
 #[tauri::command]
-pub async fn run_model_bootstrapper(window: tauri::Window) -> Result<String, String> {
-    // We call the MAIN executable, but pass the "--bootstrap" flag
+pub async fn run_model_bootstrapper(window: Window) -> Result<String, String> {
+    // Resolve the backend executable path with fallback for dev/prod
     let backend_exe = window.app_handle().path_resolver()
         .resolve_resource("resources/hackt_sovereign_core/hackt_sovereign_core.exe")
+        .or_else(|| window.app_handle().path_resolver().resolve_resource("hackt_sovereign_core.exe"))
         .ok_or("Failed to locate backend executable in resources")?;
 
     let mut child = Command::new(&backend_exe)
@@ -103,6 +104,7 @@ pub fn spawn_python_backend(
     
     let resource_path = app_handle.path_resolver()
         .resolve_resource("resources/hackt_sovereign_core/hackt_sovereign_core.exe")
+        .or_else(|| app_handle.path_resolver().resolve_resource("hackt_sovereign_core.exe"))
         .ok_or("Failed to locate main backend executable")?;
 
     let mut child = Command::new(&resource_path)
@@ -128,7 +130,7 @@ pub fn spawn_python_backend(
         });
     }
 
-    // 🔥 FIX: Lock the Mutex and store the child process so we can kill it when the app closes
+    // 🔥 FIX: Lock the Mutex and store the child process so we can kill it when the app exits
     let mut backend_guard = state.0.lock().map_err(|e| format!("Failed to lock backend state: {}", e))?;
     *backend_guard = Some(child);
 
@@ -140,7 +142,7 @@ pub fn spawn_python_backend(
 // ==============================================================================
 
 #[tauri::command]
-pub async fn trigger_google_auth(window: tauri::Window) -> Result<String, String> {
+pub async fn trigger_google_auth(window: Window) -> Result<String, String> {
     // 🚀 Make this configurable via tauri.conf.json or env vars in production
     let supabase_auth_url = option_env!("SUPABASE_AUTH_URL")
         .unwrap_or("https://YOUR_PROJECT_ID.supabase.co/auth/v1/authorize?provider=google&redirect_to=hackt://auth-callback");
@@ -156,7 +158,7 @@ pub fn generate_new_session() -> String {
 }
 
 #[tauri::command]
-pub async fn close_splashscreen(window: tauri::Window) {
+pub async fn close_splashscreen(window: Window) {
     // Gracefully handle missing windows instead of unwrap()
     if let Some(splashscreen) = window.get_window("splashscreen") {
         let _ = splashscreen.close();
@@ -174,4 +176,21 @@ pub async fn get_system_info() -> Result<serde_json::Value, String> {
         "arch": std::env::consts::ARCH,
         "note": "For accurate hardware stats, query Python backend at /api/health"
     }))
+}
+
+// ==============================================================================
+// 4. APP EXIT HOOK (Kill Python Backend)
+// ==============================================================================
+
+/// Call this from your Tauri `on_window_event` or `setup` hook to ensure
+/// the Python backend is killed when the app exits.
+pub fn kill_backend_on_exit(app_handle: &tauri::AppHandle) {
+    let state = app_handle.state::<BackendState>();
+    if let Ok(mut backend_guard) = state.0.lock() {
+        if let Some(mut child) = backend_guard.take() {
+            // Try graceful termination first
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
 }

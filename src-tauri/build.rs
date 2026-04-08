@@ -1,5 +1,3 @@
-// src-tauri/build.rs
-
 fn main() {
     // 1. Create custom Windows attributes
     let mut windows = tauri_build::WindowsAttributes::new();

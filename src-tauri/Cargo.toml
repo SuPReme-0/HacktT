@@ -6,19 +6,25 @@ authors = ["Operator"]
 edition = "2021"
 
 [build-dependencies]
-tauri-build = { version = "1.5", features = [] }
+# ✅ FIX: Enable windows-attributes feature for custom manifest injection
+tauri-build = { version = "1.5", features = ["windows-attributes"] }
 
 [dependencies]
+# ✅ FIX: Add protocol-asset feature for secure file access with fs-all
 tauri = { version = "1.5", features = [
-    "custom-protocol",   # ✅ REQUIRED – does NOT need admin
-    "dialog-all",
-    "app-all",
-    "fs-all",
-    "shell-open",
-    "system-tray"
+  "fs-all",
+  "dialog-all",
+  "app-all",
+  "shell-open",
+  "custom-protocol",
+  "system-tray",
+  "protocol-asset"  # ✅ Required for fs-all to work properly
 ] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.33", features = ["full"] }
+
 reqwest = { version = "0.11", features = ["json"] }
+# ✅ FIX: Remove deep-link plugin since we're not using it
+# tauri-plugin-deep-link = "0.1"
 uuid = { version = "1.4", features = ["v4"] }

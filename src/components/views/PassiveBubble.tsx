@@ -9,7 +9,7 @@ import {
   Shield, ShieldAlert, Mic, Volume2, Code,
   Eye, Zap, Activity, WifiOff,
   X, Check, AlertTriangle, Cpu, RefreshCw,
-  Globe, LogOut, Maximize2, Settings
+  Globe, LogOut, Maximize2, Settings, Loader2
 } from 'lucide-react';
 
 // ======================================================================
@@ -69,6 +69,7 @@ export default function PassiveBubble() {
   const [particleCount, setParticleCount] = useState(8);
   const [isDragging, setIsDragging] = useState(false);
   const [isThundering, setIsThundering] = useState(false);
+  const [isThinking, setIsThinking] = useState(false); // ✅ Added thinking state
 
   // Audio reactivity state
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -140,22 +141,30 @@ export default function PassiveBubble() {
       wsRef.current.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data) as BubbleWSPayload;
+          
+          // ✅ Handle TTS events from backend
           if (data.type === 'tts') {
             setIsSpeaking(!!data.is_speaking);
             setAudioLevel(data.is_speaking ? (data.volume ?? 1.2) : 1);
-          } else if (data.type === 'threat' && data.level) {
+          } 
+          // Handle threat events
+          else if (data.type === 'threat' && data.level) {
             if (data.level === 'high' || data.level === 'critical') {
               setIsThundering(true);
               setParticleCount(16);
               setTimeout(() => { setIsThundering(false); setParticleCount(8); }, 3000);
             }
-          } else if (data.type === 'telemetry') {
+          } 
+          // Handle telemetry updates
+          else if (data.type === 'telemetry') {
             setBackendHealth({
               cpuUsage: data.cpu_usage || 0,
               memoryUsage: data.memory_usage || 0,
               activeScans: data.active_scans || 0
             });
-          } else if (data.type === 'code_diff' && data.data) {
+          } 
+          // ✅ Handle code diff events
+          else if (data.type === 'code_diff' && data.data) {
             setActiveDiff(data.data);
             setShowDiffModal(true);
           }
@@ -198,7 +207,25 @@ export default function PassiveBubble() {
           setTimeout(() => setParticleCount(8), 2000);
         }
       }),
-      listen('stt_result', () => {
+      listen('stt_result', (event: any) => {
+        // ✅ Handle STT results from backend
+        const text = event.payload?.text;
+        if (text) {
+          setIsThinking(true);
+          // Send transcribed text to chat endpoint
+          fetch('http://127.0.0.1:8000/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              prompt: text,
+              mode: 'passive',
+              query_type: 'voice',
+              session_id: user?.name || 'active-operator'
+            })
+          })
+          .then(() => setIsThinking(false))
+          .catch(() => setIsThinking(false));
+        }
         setIsThundering(true);
         setTimeout(() => setIsThundering(false), 500);
       }),
@@ -264,8 +291,8 @@ export default function PassiveBubble() {
     }
   };
 
-   // ======================================================================
-  // 7. DYNAMIC VISUAL STATE
+  // ======================================================================
+  // 7. DYNAMIC VISUAL STATE (with thinking state)
   // ======================================================================
   const visualState = useMemo(() => {
     let coreColor = 'bg-gradient-to-br from-[#00f3ff] to-[#0066ff] shadow-[0_0_25px_rgba(0,243,255,0.6)]';
@@ -320,7 +347,16 @@ export default function PassiveBubble() {
       glowIntensity = 0.7;
     }
 
-    if (isProcessing) {
+    // ✅ Added thinking state for processing
+    if (isThinking) {
+      coreColor = 'bg-gradient-to-br from-[#ffffff] to-[#cccccc] shadow-[0_0_35px_rgba(255,255,255,0.9)]';
+      ringColor = 'border-white opacity-50 scale-105 animate-ping';
+      hudAnimation = 'animate-pulse';
+      statusText = 'THINKING...';
+      pulseSpeed = '0.3s';
+      icon = <Loader2 size={20} className="text-[#0a0a0a] animate-spin" />;
+      glowIntensity = 0.9;
+    } else if (isProcessing) {
       coreColor = 'bg-gradient-to-br from-[#ffffff] to-[#cccccc] shadow-[0_0_35px_rgba(255,255,255,0.9)]';
       ringColor = 'border-white opacity-50 scale-105 animate-ping';
       hudAnimation = 'animate-pulse';
@@ -349,13 +385,13 @@ export default function PassiveBubble() {
     }
 
     return { coreColor, ringColor, hudAnimation, statusText, isAlert, pulseSpeed, icon, glowIntensity };
-  }, [isProcessing, isSpeaking, threatLevel, connectionStatus, backendConnected, isThundering]);
+  }, [isProcessing, isSpeaking, threatLevel, connectionStatus, backendConnected, isThundering, isThinking]);
 
   // ======================================================================
   // 8. BUBBLE CLICK: TRIGGER STT AND SEND TO CHAT
   // ======================================================================
   const handleBubbleClick = useCallback(async (e: React.MouseEvent) => {
-    if (isProcessing || isSpeaking) return;
+    if (isProcessing || isSpeaking || isThinking) return;
     if (e.button === 2) return;
 
     setIsThundering(true);
@@ -367,16 +403,20 @@ export default function PassiveBubble() {
 
     try {
       if (visualState.isAlert) {
+        // Auto-patch for critical threats
         await invoke('trigger_ide_fix_action', {
           session_id: user?.name || 'active-operator',
           instruction: "Surgically patch the detected vulnerability."
         });
       } else {
-        // ✅ Actually trigger voice recognition, not just toggle permission
+        // ✅ Voice command flow: STT → Chat → TTS
         if (!permissions.micEnabled) {
           console.warn("Mic permission is disabled.");
           return;
         }
+
+        // Show thinking state
+        setIsThinking(true);
 
         // 1. Start listening (non‑blocking)
         const transcribeRes = await fetch('http://127.0.0.1:8000/api/audio/transcribe', {
@@ -386,7 +426,7 @@ export default function PassiveBubble() {
 
         if (transcribeData.text) {
           // 2. Send transcribed text to chat engine
-          await fetch('http://127.0.0.1:8000/api/chat', {
+          const chatRes = await fetch('http://127.0.0.1:8000/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -396,12 +436,26 @@ export default function PassiveBubble() {
               session_id: user?.name || 'active-operator'
             })
           });
+          
+          // 3. Get response text for TTS
+          const chatData = await chatRes.json();
+          if (chatData.text) {
+            // 4. Trigger TTS to speak the response
+            await fetch('http://127.0.0.1:8000/api/tts', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ text: chatData.text })
+            });
+          }
         }
       }
     } catch (error) {
       console.error("Failed to execute bubble command:", error);
+    } finally {
+      // Hide thinking state
+      setIsThinking(false);
     }
-  }, [isProcessing, isSpeaking, visualState.isAlert, user?.name, permissions.micEnabled]);
+  }, [isProcessing, isSpeaking, isThinking, visualState.isAlert, user?.name, permissions.micEnabled]);
 
   // ======================================================================
   // 9. CONTEXT MENU HANDLERS
@@ -739,21 +793,19 @@ export default function PassiveBubble() {
         </div>
       )}
 
-      {/* Code Diff Modal – MUST have pointer-events-auto to be clickable */}
-      <div className="pointer-events-auto">
-        {activeDiff && (
-          <CodeDiffModal
-            isOpen={showDiffModal}
-            onClose={() => { setShowDiffModal(false); setActiveDiff(null); }}
-            onApply={applyCodeFix}
-            originalCode={activeDiff.original_code}
-            suggestedFix={activeDiff.suggested_fix}
-            threatLevel={activeDiff.threat_level as any}
-            source={activeDiff.source}
-            vulnerability={activeDiff.vulnerability}
-          />
-        )}
-      </div>
+      {/* Code Diff Modal – Properly placed without pointer-events wrapper */}
+      {showDiffModal && activeDiff && (
+        <CodeDiffModal
+          isOpen={showDiffModal}
+          onClose={() => { setShowDiffModal(false); setActiveDiff(null); }}
+          onApply={applyCodeFix}
+          originalCode={activeDiff.original_code}
+          suggestedFix={activeDiff.suggested_fix}
+          threatLevel={activeDiff.threat_level as any}
+          source={activeDiff.source}
+          vulnerability={activeDiff.vulnerability}
+        />
+      )}
     </div>
   );
 }
