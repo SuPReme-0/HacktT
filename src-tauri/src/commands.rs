@@ -167,19 +167,3 @@ pub async fn get_system_info() -> Result<serde_json::Value, String> {
         "note": "For accurate hardware stats, query Python backend at /api/health"
     }))
 }
-
-// ==============================================================================
-// 4. APP EXIT HOOK (Kill Python Backend)
-// ==============================================================================
-
-pub fn kill_backend_on_exit(app_handle: &tauri::AppHandle) {
-    let state = app_handle.state::<BackendState>();
-    
-    // ✅ FIX: Use .inner() to satisfy the borrow checker
-    if let Ok(mut backend_guard) = state.inner().0.lock() {
-        if let Some(mut child) = backend_guard.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-    }
-}

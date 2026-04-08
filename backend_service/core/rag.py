@@ -1,20 +1,17 @@
 """
-HackT Sovereign Core - Adaptive Hybrid Retriever (v4.2)
+HackT Sovereign Core - Adaptive Hybrid Retriever (v4.3)
 =======================================================
 Production-sealed RAG implementation featuring:
 - Native LanceDB Hybrid Search (Tantivy FTS + Vector in Rust)
-- Strict Vault-Aware Routing (Prevents Cross-Vault Hallucination)
-- Dynamic Anti-Hallucination Shield (Distance OR Score-based)
-- Batch Graph Authority Boosting (Single KùzuDB Query)
-- Token-Aware Context Packing
-- Voice Bypass Circuit for sub-50ms latency
-- Read-Only Graph Concurrency Safety
-- Efficient Vault Stats Collection
+- Strict Vault-Aware Routing
+- Dynamic Anti-Hallucination Shield
+- Batch Graph Authority Boosting
+- Fixed: LanceDB Hybrid API Syntax & Python Variable Scoping
 """
 
 import numpy as np
 from pathlib import Path
-from typing import List, Dict, Optional, Any, Union
+from typing import List, Dict, Optional, Any
 
 from utils.logger import get_logger
 from utils.config import config
@@ -31,29 +28,23 @@ except ImportError:
 
 logger = get_logger("hackt.core.rag")
 
-
 class HybridRetriever:
     """
     Knowledge Vault interaction layer.
     Engineered for zero-hallucination, ultra-low latency context retrieval.
-    Utilizes native Rust-backed hybrid search for maximum performance.
     """
     
     def __init__(self):
-        # 🚀 PyInstaller-Safe Path Resolution
         self.index_dir = config.paths.models_dir / "index"
         
         # Database Connections
         self.vector_table = None
         self.graph_conn = None
-        self._db = None  # LanceDB connection handle
+        self._db = None 
         
-        # 🚀 Retrieval Tuning Parameters (Synced with config)
         self.semantic_threshold = config.rag.semantic_threshold
         self.max_context_chars = config.rag.max_context_chars
         
-        # 🚀 Vault Definitions (Mapping for safe routing)
-        # Syncs with orchestrator.py classify_vault_intent()
         self.vault_map = {
             "library": config.vaults.library_id,      # 1
             "laboratory": config.vaults.laboratory_id,  # 2
@@ -64,14 +55,12 @@ class HybridRetriever:
     
     def _initialize_databases(self):
         """Safely boots local embedded databases with concurrency safety."""
-        
-        # 1. LanceDB (Vector + Native Tantivy FTS)
+        # 1. LanceDB 
         if lancedb:
             try:
-                # ✅ CORRECT: Connect to the DB Root, so it can find the tables inside
                 lance_path = str(self.index_dir)
                 self._db = lancedb.connect(lance_path)
-
+                        
                 if "vault_chunks" in self._db.table_names():
                     self.vector_table = self._db.open_table("vault_chunks")
                     logger.info("RAG: LanceDB Vector & Tantivy FTS Engines ONLINE.")
@@ -80,17 +69,16 @@ class HybridRetriever:
             except Exception as e:
                 logger.error(f"RAG: LanceDB connection failed: {e}")
         
-        # 2. KùzuDB (Graph for Authority Boosting)
+        # 2. KùzuDB 
         if kuzu:
             try:
                 graph_path = str(self.index_dir / "vault.graph")
                 if Path(graph_path).exists():
-                    # 🛡️ CRITICAL: Explicitly enforce read-only to prevent worker deadlocks
                     db = kuzu.Database(graph_path, read_only=True)
                     self.graph_conn = kuzu.Connection(db)
                     logger.info("RAG: KùzuDB Graph Engine ONLINE (Read-Only).")
             except Exception as e:
-                logger.error(f"RAG: KùzuDB connection failed (Check .lock files): {e}")
+                logger.error(f"RAG: KùzuDB connection failed: {e}")
     
     def retrieve(
         self,
@@ -101,26 +89,13 @@ class HybridRetriever:
         target_vault: Optional[str] = None,
         limit: int = 15
     ) -> List[Dict]:
-        """
-        Master Retrieval Pipeline.
         
-        Args:
-            query: Text query for hybrid search
-            query_vector: Pre-computed embedding vector
-            mode: "active" or "passive" (affects graph boosting)
-            query_type: "chat", "voice", "audit", "idle"
-            target_vault: "library", "laboratory", "showroom", or None (all)
-            limit: Max results to fetch before filtering
-        
-        Returns:
-            List of context chunks ready for LLM injection
-        """
         if not self.vector_table:
             logger.error("RAG: Vector table offline. Cannot retrieve.")
             return []
         
         # ==================================================================
-        # 1. VAULT FILTERING (The Separation Layer)
+        # 1. VAULT FILTERING
         # ==================================================================
         prefilter = None
         if target_vault and target_vault.lower() in self.vault_map:
@@ -129,44 +104,53 @@ class HybridRetriever:
             logger.debug(f"RAG: Routing query strictly to Vault {v_id} ({target_vault})")
         
         # ==================================================================
-        # 2. VOICE BYPASS CIRCUIT (Pure Vector, sub-50ms)
+        # 2. VOICE BYPASS CIRCUIT (Pure Vector)
         # ==================================================================
         if query_type == "voice":
-            # Skip hybrid search for maximum speed during voice conversation
-            search_obj = self.vector_table.search(
-                query_vector.flatten()
-            ).limit(3)
-            
+            search_obj = self.vector_table.search(query_vector.flatten()).limit(3)
             if prefilter:
-                # 🛡️ CRITICAL: Apply prefilter BEFORE limiting for correct planning
                 search_obj = search_obj.where(prefilter)
             
             results = search_obj.to_pandas().to_dict('records')
-            # 🛡️ CRITICAL: Apply semantic threshold filtering to voice path
             return self._pack_context(results)
+        
         # ==================================================================
-        # 3. NATIVE HYBRID RRF SEARCH
+        # 3. NATIVE HYBRID RRF SEARCH 
         # ==================================================================
+        # 🛡️ CRITICAL FIX 1: Initialize variable BEFORE the try block to prevent Scope Errors
+        raw_results = [] 
+        
         try:
-            # 🛡️ UPGRADED SYNTAX: Pass the text query and vector together
-            search_obj = self.vector_table.search(query, query_type="hybrid")\
-                                          .vector(query_vector.flatten())
+            # 🛡️ CRITICAL FIX 2: Modern LanceDB API strict syntax for Hybrid Search
+            search_obj = self.vector_table.search(query_type="hybrid") \
+                                          .vector(query_vector.flatten()) \
+                                          .text(query)
             
             if prefilter:
                 search_obj = search_obj.where(prefilter)
             
             search_obj = search_obj.limit(limit)
-            
             raw_results = search_obj.to_pandas().to_dict('records')
             logger.debug(f"RAG: Hybrid search returned {len(raw_results)} results")
             
         except Exception as e:
-            # 🔥 Crucial: Print the EXACT error 'e' so we stop guessing
             logger.error(f"RAG: Native hybrid search failed: {e}")
             logger.info("RAG: Falling back to Vector-only search.")
-
+            
+            # 🛡️ CRITICAL FIX 3: Actually execute the fallback if Tantivy fails
+            try:
+                search_obj = self.vector_table.search(query_vector.flatten())
+                if prefilter:
+                    search_obj = search_obj.where(prefilter)
+                
+                search_obj = search_obj.limit(limit)
+                raw_results = search_obj.to_pandas().to_dict('records')
+            except Exception as fallback_e:
+                logger.error(f"RAG: Fallback vector search also failed: {fallback_e}")
+                raw_results = [] # Failsafe
+        
         # ==================================================================
-        # 4. GRAPH BOOST (Authority Routing via KùzuDB)
+        # 4. GRAPH BOOST
         # ==================================================================
         if mode == "passive" and self.graph_conn and raw_results:
             raw_results = self._graph_boost_authority(raw_results)
@@ -177,24 +161,16 @@ class HybridRetriever:
         return self._pack_context(raw_results)
     
     def _graph_boost_authority(self, chunks: List[Dict]) -> List[Dict]:
-        """
-        Queries KùzuDB in ONE batch to boost relevance of high-authority files.
-        Files with many dependencies/imports get a confidence boost.
-        🛡️ CRITICAL: Single batch query with IN clause (15x faster than N+1)
-        """
         if not self.graph_conn or not chunks:
             return chunks
         
         try:
-            # 1. Gather all unique filenames
             source_files = list({chunk.get("source") for chunk in chunks if chunk.get("source")})
             if not source_files:
                 return chunks
 
-            # 2. 🛡️ CRITICAL: Sanitize filenames to prevent Cypher injection
             safe_files = [str(f).replace("'", "''").replace('"', '""') for f in source_files]
 
-            # 3. Execute ONE batch query using IN clause
             query = """
             MATCH (f:File)
             WHERE f.name IN $filenames
@@ -202,41 +178,29 @@ class HybridRetriever:
             """
             result = self.graph_conn.execute(query, {"filenames": safe_files})
             
-            # 4. Build a fast lookup dictionary in RAM
             auth_map = {}
             while result.has_next():
                 row = result.get_next()
                 auth_map[row[0]] = float(row[1])
 
-            # 5. Apply boosts with capped multiplier and correct semantics
             for chunk in chunks:
                 source_file = chunk.get("source", "")
                 auth_score = auth_map.get(source_file, 0.0)
-                
                 chunk["graph_score"] = auth_score
                 
-                # 🛡️ CRITICAL: Cap authority boost to prevent score distortion
-                max_boost = 0.2  # 20% max boost
+                max_boost = 0.2
                 boost = min(auth_score * 0.1, max_boost) if auth_score else 0.0
                 
-                # 🛡️ CRITICAL: Handle distance (lower=better) vs score (higher=better) correctly
                 if "_distance" in chunk:
-                    # Lower distance is better: subtract boost to improve ranking
                     chunk["boosted_score"] = chunk["_distance"] - boost
                 elif "_score" in chunk:
-                    # Higher score is better: add boost to improve ranking
                     chunk["boosted_score"] = chunk["_score"] + boost
                 else:
-                    # Fallback: treat as score (higher=better)
                     chunk["boosted_score"] = chunk.get("_score", 0.0) + boost
             
-            # Re-sort by the new boosted score (lower is better for distance, higher for score)
-            # Check if we're dealing with distance-based or score-based results
             if any("_distance" in c for c in chunks if "boosted_score" in c):
-                # Distance-based: sort ascending (lower distance = better)
                 return sorted(chunks, key=lambda x: x.get("boosted_score", float('inf')))
             else:
-                # Score-based: sort descending (higher score = better)
                 return sorted(chunks, key=lambda x: x.get("boosted_score", 0.0), reverse=True)
             
         except Exception as e:
@@ -244,29 +208,20 @@ class HybridRetriever:
             return chunks
     
     def _pack_context(self, raw_results: List[Dict]) -> List[Dict]:
-        """
-        Filters bad matches dynamically based on Vector Distance OR Hybrid RRF Score.
-        🛡️ CRITICAL: Handles both _distance (vector) and _score (hybrid) fields.
-        """
         packed_results = []
         current_chars = 0
         
         for doc in raw_results:
-            # 🛡️ CRITICAL: Dynamic Anti-Hallucination Shield
             if "_distance" in doc:
-                # Pure Vector Search: Lower distance is better
                 if doc["_distance"] > self.semantic_threshold:
                     continue
             elif "_score" in doc:
-                # Hybrid Search (RRF): Higher score is better
-                # Minimum threshold to filter garbage results
                 if doc["_score"] < 0.1:
                     continue
-            # If neither field exists, include by default (fallback behavior)
             
             text_len = len(doc.get("text", ""))
             if current_chars + text_len > self.max_context_chars:
-                break  # Stop packing to protect LLM context window
+                break 
             
             packed_results.append(doc)
             current_chars += text_len
@@ -277,30 +232,25 @@ class HybridRetriever:
         return packed_results
     
     def get_vault_stats(self) -> Dict[str, int]:
-        """Returns document count per vault for telemetry."""
         if not self.vector_table:
             return {}
         
         stats = {}
         try:
             for vault_name, vault_id in self.vault_map.items():
-                # 🛡️ CRITICAL: Use LanceDB's count_rows if available (v0.10+) for efficiency
                 if hasattr(self.vector_table, 'count_rows'):
                     count = self.vector_table.count_rows(f"vault_id = {vault_id}")
                 else:
-                    # Fallback: filtered scan with limit to avoid OOM (approximate for telemetry)
                     df = self.vector_table.search([0.0]*256).where(f"vault_id = {vault_id}").limit(1000).to_pandas()
-                    count = len(df)  # Not exact count, but indicates presence and scale
+                    count = len(df)
                 stats[vault_name] = count
         except Exception as e:
             logger.warning(f"RAG: Failed to get vault stats: {e}")
             for vault_name in self.vault_map:
                 stats[vault_name] = 0
-        
         return stats
     
     def health_check(self) -> Dict[str, Any]:
-        """Returns health status for /api/health endpoint."""
         return {
             "vector_table": self.vector_table is not None,
             "graph_conn": self.graph_conn is not None,
@@ -308,7 +258,6 @@ class HybridRetriever:
             "max_context_chars": self.max_context_chars,
             "vault_map": self.vault_map
         }
-
 
 # Singleton Instance
 retriever = HybridRetriever()
