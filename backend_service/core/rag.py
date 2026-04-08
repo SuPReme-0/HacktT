@@ -71,7 +71,7 @@ class HybridRetriever:
                 # ✅ CORRECT: Connect to the DB Root, so it can find the tables inside
                 lance_path = str(self.index_dir)
                 self._db = lancedb.connect(lance_path)
-                        
+
                 if "vault_chunks" in self._db.table_names():
                     self.vector_table = self._db.open_table("vault_chunks")
                     logger.info("RAG: LanceDB Vector & Tantivy FTS Engines ONLINE.")
@@ -144,35 +144,27 @@ class HybridRetriever:
             results = search_obj.to_pandas().to_dict('records')
             # 🛡️ CRITICAL: Apply semantic threshold filtering to voice path
             return self._pack_context(results)
-        
         # ==================================================================
-        # 3. NATIVE HYBRID RRF SEARCH (LanceDB handles Rust-level fusion)
+        # 3. NATIVE HYBRID RRF SEARCH
         # ==================================================================
         try:
-            # 🛡️ CRITICAL: LanceDB native hybrid: vector + text automatically fused
-            # 🛡️ CRITICAL: Apply prefilter BEFORE text search for correct query planning
-            search_obj = self.vector_table.search(query_vector.flatten())
+            # 🛡️ UPGRADED SYNTAX: Pass the text query and vector together
+            search_obj = self.vector_table.search(query, query_type="hybrid")\
+                                          .vector(query_vector.flatten())
             
             if prefilter:
                 search_obj = search_obj.where(prefilter)
             
-            search_obj = search_obj.text(query).limit(limit)
+            search_obj = search_obj.limit(limit)
             
             raw_results = search_obj.to_pandas().to_dict('records')
             logger.debug(f"RAG: Hybrid search returned {len(raw_results)} results")
             
         except Exception as e:
-            logger.error(f"RAG: Native hybrid search failed (Tantivy missing?): {e}")
+            # 🔥 Crucial: Print the EXACT error 'e' so we stop guessing
+            logger.error(f"RAG: Native hybrid search failed: {e}")
             logger.info("RAG: Falling back to Vector-only search.")
-            
-            # Fallback to vector-only if Tantivy index is corrupted
-            search_obj = self.vector_table.search(query_vector.flatten())
-            
-            if prefilter:
-                search_obj = search_obj.where(prefilter)
-            
-            raw_results = search_obj.to_pandas().to_dict('records')
-        
+
         # ==================================================================
         # 4. GRAPH BOOST (Authority Routing via KùzuDB)
         # ==================================================================
