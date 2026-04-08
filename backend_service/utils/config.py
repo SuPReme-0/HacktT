@@ -46,7 +46,7 @@ class ModelConfig(BaseSettings):
     model_config = SettingsConfigDict(extra='ignore')
 
     # Qwen 3.5 LLM
-    llm_filename: str = "Qwen3.5-4b-Q4_K_M.gguf"
+    llm_filename: str = "Qwen3.5-4B-Q4_K_M.gguf"
     llm_n_ctx: int = Field(default=4096, gt=512)
     llm_n_batch: int = Field(default=512, gt=64)
     llm_temperature: float = Field(default=0.1, ge=0.0, le=2.0)

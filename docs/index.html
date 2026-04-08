@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HackT Runtime | Sovereign AI Security Agent</title>
+    <meta name="description" content="A completely localized, multi-modal cybersecurity agent. Deep system integration, hardware-aware scaling, and zero cloud dependency.">
+    <meta name="keywords" content="cybersecurity, AI, local AI, Qwen, Florence-2, security agent, offline AI">
+    <meta name="author" content="HackT Systems">
+    
+    <!-- Open Graph / Social Sharing -->
+    <meta property="og:title" content="HackT Runtime | Sovereign AI Security Agent">
+    <meta property="og:description" content="Your local AI security agent. 100% offline, hardware-aware, zero cloud dependency.">
+    <meta property="og:type" content="website">
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+
+        :root {
+            --bg-deep: #030305;
+            --bg-surface: #0a0a0f;
+            --bg-panel: rgba(10, 10, 15, 0.65);
+            --accent-cyan: #00f3ff;
+            --accent-purple: #bc13fe;
+            --accent-red: #ff003c;
+            --text-main: #e0e0e0;
+            --text-muted: #888888;
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --shadow-glow-cyan: 0 0 20px rgba(0, 243, 255, 0.3);
+            --shadow-glow-purple: 0 0 20px rgba(188, 19, 254, 0.3);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        html { scroll-behavior: smooth; }
+
+        body {
+            background-color: var(--bg-deep);
+            color: var(--text-main);
+            font-family: 'Inter', sans-serif;
+            overflow-x: hidden;
+            line-height: 1.6;
+            background-image: 
+                linear-gradient(rgba(0, 243, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 243, 255, 0.03) 1px, transparent 1px);
+            background-size: 30px 30px;
+            background-position: center center;
+        }
+
+        /* Ambient Background Glow */
+        .ambient-light {
+            position: fixed;
+            top: -20%; left: -10%; width: 50vw; height: 50vw;
+            background: radial-gradient(circle, rgba(0,243,255,0.05) 0%, transparent 70%);
+            z-index: 0; pointer-events: none;
+            animation: float 20s ease-in-out infinite;
+        }
+        .ambient-light.purple {
+            top: auto; bottom: -20%; left: auto; right: -10%;
+            background: radial-gradient(circle, rgba(188,19,254,0.05) 0%, transparent 70%);
+            animation-delay: -10s;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translate(0, 0); }
+            50% { transform: translate(30px, 30px); }
+        }
+
+        /* Typography & Utilities */
+        h1, h2, h3, h4, .mono { font-family: 'JetBrains Mono', monospace; }
+        .text-cyan { color: var(--accent-cyan); }
+        .text-purple { color: var(--accent-purple); }
+        .text-red { color: var(--accent-red); }
+        
+        .glass-panel {
+            background: var(--bg-panel);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            position: relative;
+            z-index: 10;
+            transition: all 0.3s ease;
+        }
+        .glass-panel:hover {
+            border-color: rgba(255, 255, 255, 0.15);
+            box-shadow: var(--shadow-glow-cyan);
+        }
+
+        /* Navigation */
+        nav {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 20px 5%; border-bottom: 1px solid var(--glass-border);
+            position: fixed; width: 100%; top: 0; z-index: 100;
+            background: rgba(3, 3, 5, 0.9); backdrop-filter: blur(10px);
+        }
+        .logo { font-size: 1.5rem; font-weight: 700; letter-spacing: 2px; }
+        .nav-links { display: flex; gap: 30px; }
+        .nav-links a {
+            color: var(--text-muted); text-decoration: none; font-size: 0.9rem;
+            transition: color 0.3s; font-family: 'JetBrains Mono', monospace;
+        }
+        .nav-links a:hover { color: var(--accent-cyan); }
+        .nav-cta {
+            padding: 8px 20px; border: 1px solid var(--accent-cyan);
+            border-radius: 6px; color: var(--accent-cyan); text-decoration: none;
+            font-family: 'JetBrains Mono', monospace; font-size: 0.85rem;
+            transition: all 0.3s;
+        }
+        .nav-cta:hover {
+            background: var(--accent-cyan); color: #000;
+            box-shadow: var(--shadow-glow-cyan);
+        }
+
+        /* Hero Section */
+        .hero {
+            min-height: 100vh; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; text-align: center;
+            padding: 120px 5% 60px; position: relative; z-index: 10;
+        }
+        .hero-badge {
+            font-size: 0.75rem; font-family: 'JetBrains Mono', monospace;
+            padding: 6px 14px; border: 1px solid var(--accent-cyan);
+            border-radius: 20px; color: var(--accent-cyan); margin-bottom: 24px;
+            box-shadow: var(--shadow-glow-cyan);
+            animation: pulse 2s infinite;
+            display: inline-block;
+        }
+        .hero h1 {
+            font-size: clamp(2.5rem, 6vw, 4.5rem); line-height: 1.1;
+            margin-bottom: 24px; letter-spacing: -1px;
+        }
+        .hero p {
+            font-size: 1.15rem; color: var(--text-muted); max-width: 700px;
+            margin-bottom: 40px; line-height: 1.8;
+        }
+
+        /* Dynamic Terminal */
+        .terminal-container {
+            width: 100%; max-width: 650px; text-align: left;
+            margin-bottom: 40px; font-size: 0.85rem; color: #a0a0a0;
+        }
+        .terminal-header {
+            background: #151515; padding: 10px 16px; border-radius: 8px 8px 0 0;
+            display: flex; gap: 8px; border: 1px solid var(--glass-border); border-bottom: none;
+        }
+        .dot { width: 12px; height: 12px; border-radius: 50%; }
+        .dot:nth-child(1) { background: #ff5f56; }
+        .dot:nth-child(2) { background: #ffbd2e; }
+        .dot:nth-child(3) { background: #27c93f; }
+        .terminal-body {
+            padding: 24px; border-radius: 0 0 8px 8px;
+            border: 1px solid var(--glass-border); border-top: none;
+            height: 140px; overflow: hidden; font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Download Buttons */
+        .download-section {
+            display: flex; gap: 20px; flex-wrap: wrap; justify-content: center;
+            margin-top: 30px;
+        }
+        .btn-primary {
+            padding: 16px 36px; background: rgba(0, 243, 255, 0.1);
+            color: var(--accent-cyan); border: 1px solid var(--accent-cyan);
+            border-radius: 6px; font-family: 'JetBrains Mono', monospace;
+            font-size: 0.95rem; font-weight: 700; cursor: pointer; text-decoration: none;
+            letter-spacing: 1px; transition: all 0.3s ease;
+            box-shadow: var(--shadow-glow-cyan);
+            display: inline-flex; align-items: center; gap: 10px;
+        }
+        .btn-primary:hover {
+            background: var(--accent-cyan); color: #000;
+            box-shadow: 0 0 40px rgba(0,243,255,0.5); transform: translateY(-3px);
+        }
+        .btn-secondary {
+            padding: 16px 36px; background: rgba(188, 19, 254, 0.1);
+            color: var(--accent-purple); border: 1px solid var(--accent-purple);
+            border-radius: 6px; font-family: 'JetBrains Mono', monospace;
+            font-size: 0.95rem; font-weight: 700; cursor: pointer; text-decoration: none;
+            letter-spacing: 1px; transition: all 0.3s ease;
+            box-shadow: var(--shadow-glow-purple);
+            display: inline-flex; align-items: center; gap: 10px;
+        }
+        .btn-secondary:hover {
+            background: var(--accent-purple); color: #fff;
+            box-shadow: 0 0 40px rgba(188,19,254,0.5); transform: translateY(-3px);
+        }
+
+        /* System Requirements */
+        .requirements {
+            padding: 80px 5%; position: relative; z-index: 10;
+        }
+        .section-title {
+            text-align: center; margin-bottom: 60px; font-size: 2.2rem;
+        }
+        .req-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 24px; max-width: 1000px; margin: 0 auto;
+        }
+        .req-card {
+            padding: 30px; text-align: center;
+        }
+        .req-icon { font-size: 2.5rem; margin-bottom: 16px; }
+        .req-card h4 { font-size: 1.1rem; margin-bottom: 12px; color: #fff; }
+        .req-card p { color: var(--text-muted); font-size: 0.9rem; }
+        .req-card.minimum { border-color: rgba(255, 176, 0, 0.3); }
+        .req-card.recommended { border-color: var(--accent-cyan); }
+
+        /* Features Grid */
+        .features { padding: 100px 5%; position: relative; z-index: 10; }
+        .feature-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 30px; max-width: 1200px; margin: 0 auto;
+        }
+        .feature-card {
+            padding: 40px 30px; opacity: 0; transform: translateY(30px);
+            transition: all 0.5s ease;
+        }
+        .feature-card.visible { opacity: 1; transform: translateY(0); }
+        .feature-card:hover {
+            border-color: var(--accent-purple);
+            box-shadow: 0 10px 40px rgba(188,19,254,0.15);
+            transform: translateY(-8px);
+        }
+        .feature-icon { font-size: 2.2rem; margin-bottom: 20px; }
+        .feature-card h3 { font-size: 1.4rem; margin-bottom: 16px; color: #fff; }
+        .feature-card p { color: var(--text-muted); font-size: 0.95rem; line-height: 1.7; }
+
+        /* Architecture Diagram */
+        .architecture {
+            padding: 100px 5%; position: relative; z-index: 10;
+            background: rgba(10, 10, 15, 0.3);
+        }
+        .arch-diagram {
+            max-width: 900px; margin: 40px auto; padding: 40px;
+            text-align: center;
+        }
+        .arch-layer {
+            padding: 20px; margin: 15px 0; border-radius: 8px;
+            font-family: 'JetBrains Mono', monospace; font-size: 0.9rem;
+        }
+        .arch-layer.frontend { border: 1px solid var(--accent-cyan); background: rgba(0,243,255,0.05); }
+        .arch-layer.rust { border: 1px solid var(--accent-purple); background: rgba(188,19,254,0.05); }
+        .arch-layer.python { border: 1px solid var(--accent-red); background: rgba(255,0,60,0.05); }
+
+        /* FAQ Section */
+        .faq { padding: 100px 5%; position: relative; z-index: 10; }
+        .faq-item {
+            max-width: 800px; margin: 0 auto 20px; padding: 24px;
+            cursor: pointer;
+        }
+        .faq-question {
+            font-size: 1.1rem; font-weight: 600; display: flex;
+            justify-content: space-between; align-items: center;
+        }
+        .faq-answer {
+            margin-top: 16px; color: var(--text-muted);
+            line-height: 1.8; display: none;
+        }
+        .faq-item.active .faq-answer { display: block; }
+        .faq-item.active .faq-question { color: var(--accent-cyan); }
+
+        /* Footer */
+        footer {
+            text-align: center; padding: 60px 20px;
+            border-top: 1px solid var(--glass-border);
+            font-size: 0.85rem; color: #666; margin-top: 50px;
+        }
+        footer a {
+            color: var(--text-muted); text-decoration: none;
+            margin: 0 15px; transition: color 0.3s;
+        }
+        footer a:hover { color: var(--accent-cyan); }
+        .footer-links { margin: 20px 0; }
+        .social-links { margin-top: 20px; }
+
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(0, 243, 255, 0.4); }
+            70% { box-shadow: 0 0 0 12px rgba(0, 243, 255, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(0, 243, 255, 0); }
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .nav-links { display: none; }
+            .hero h1 { font-size: 2.2rem; }
+            .download-section { flex-direction: column; align-items: center; }
+            .btn-primary, .btn-secondary { width: 100%; max-width: 300px; justify-content: center; }
+        }
+    </style>
+</head>
+<body>
+    <div class="ambient-light"></div>
+    <div class="ambient-light purple"></div>
+
+    <!-- Navigation -->
+    <nav>
+        <div class="logo mono">HACKT<span class="text-cyan">.AI</span></div>
+        <div class="nav-links">
+            <a href="#features">Features</a>
+            <a href="#requirements">Requirements</a>
+            <a href="#architecture">Architecture</a>
+            <a href="#faq">FAQ</a>
+        </div>
+        <a href="privacy.html" class="nav-cta">Privacy Policy</a>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="hero-badge">● V1.0.0 PRODUCTION BETA READY</div>
+        <h1>Sovereign Security <br> <span class="text-purple">Knowledge Vault</span></h1>
+        <p>A completely localized, multi-modal cybersecurity agent. Deep system integration, hardware-aware scaling, and zero cloud dependency. Your data stays on your rig—forever.</p>
+
+        <div class="terminal-container">
+            <div class="terminal-header">
+                <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+            </div>
+            <div class="terminal-body glass-panel" id="terminal-text">
+                > Initializing startup sequence...
+            </div>
+        </div>
+
+        <div class="download-section" id="download-btns" style="display: none;">
+            <a href="https://github.com/yourusername/hackt-runtime/releases/download/v1.0.0/HackT_Setup_v1.0.0.exe" class="btn-primary">
+                ⬇ DOWNLOAD RUNTIME (.EXE)
+            </a>
+            <a href="https://github.com/yourusername/hackt-runtime" class="btn-secondary">
+                ⭐ VIEW SOURCE CODE
+            </a>
+        </div>
+    </section>
+
+    <!-- System Requirements -->
+    <section class="requirements" id="requirements">
+        <h2 class="section-title mono">SYSTEM <span class="text-cyan">REQUIREMENTS</span></h2>
+        <div class="req-grid">
+            <div class="req-card glass-panel minimum">
+                <div class="req-icon">⚡</div>
+                <h4>MINIMUM (Active Mode)</h4>
+                <p><b>RAM:</b> 8 GB</p>
+                <p><b>VRAM:</b> 4 GB (Integrated OK)</p>
+                <p><b>Storage:</b> 10 GB Free</p>
+                <p><b>OS:</b> Windows 10/11 64-bit</p>
+                <p class="text-cyan" style="margin-top: 12px;">Chat + RAG Only</p>
+            </div>
+            <div class="req-card glass-panel recommended">
+                <div class="req-icon">🚀</div>
+                <h4>RECOMMENDED (Passive Mode)</h4>
+                <p><b>RAM:</b> 16 GB</p>
+                <p><b>VRAM:</b> 6 GB+ Dedicated</p>
+                <p><b>Storage:</b> 20 GB SSD</p>
+                <p><b>OS:</b> Windows 11 64-bit</p>
+                <p class="text-purple" style="margin-top: 12px;">Full Sentinel Suite</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Grid -->
+    <section class="features" id="features">
+        <h2 class="section-title mono">CORE <span class="text-cyan">ARCHITECTURE</span></h2>
+        <div class="feature-grid" id="feature-grid">
+            <div class="feature-card glass-panel">
+                <div class="feature-icon">🧠</div>
+                <h3>Hardware-Aware Logic</h3>
+                <p>Features a dynamic toggle. Run strictly <b>Active Mode</b> (Qwen 3.5 4B reasoning) for low-spec machines, or unlock <b>Passive Mode</b> to engage full background monitoring if your rig has 6GB+ Dedicated VRAM. Automatic VRAM detection prevents OOM crashes.</p>
+            </div>
+
+            <div class="feature-card glass-panel">
+                <div class="feature-icon">👁️</div>
+                <h3>Florence-2 Vision OCR</h3>
+                <p>Passive mode triggers advanced screen capture pipelines. HackT natively reads your IDE and browser windows via Florence-2 Base, detecting phishing attempts, vulnerable code syntax, and suspicious UI elements in real-time. Model loads ephemeral to save VRAM.</p>
+            </div>
+
+            <div class="feature-card glass-panel">
+                <div class="feature-icon">🔐</div>
+                <h3>Local Cryptographic Vault</h3>
+                <p>Powered by LanceDB vector search and KùzuDB graph databases. HackT learns from your projects, remembers past vulnerabilities, and builds a personalized, air-gapped threat intelligence database. All data encrypted at rest.</p>
+            </div>
+
+            <div class="feature-card glass-panel">
+                <div class="feature-icon">🎙️</div>
+                <h3>Voice Command Interface</h3>
+                <p>Faster-Whisper Tiny runs locally on CPU for real-time speech-to-text. Issue commands hands-free while coding. Piper TTS provides natural voice responses. All audio processing stays on-device—no cloud APIs.</p>
+            </div>
+
+            <div class="feature-card glass-panel">
+                <div class="feature-icon">🔌</div>
+                <h3>IDE & Browser Integration</h3>
+                <p>WebSocket listeners on ports 8081 (IDE) and 8082 (Browser) enable real-time code stream analysis and phishing detection. VS Code and Chrome extensions available. Passive mode only.</p>
+            </div>
+
+            <div class="feature-card glass-panel">
+                <div class="feature-icon">🛡️</div>
+                <h3>Zero-Knowledge Privacy</h3>
+                <p>Only email and profile name stored for authentication via Supabase Auth. All conversations, code snippets, threat intel, and vault data remain 100% local. No telemetry, no analytics, no cloud sync unless explicitly enabled.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Architecture Diagram -->
+    <section class="architecture" id="architecture">
+        <h2 class="section-title mono">RUNTIME <span class="text-purple">FLOW</span></h2>
+        <div class="arch-diagram glass-panel">
+            <div class="arch-layer frontend">
+                <b>React + Tauri Frontend</b><br>
+                UI, Chat, Settings, Passive Bubble (Port 1420)
+            </div>
+            <div style="font-size: 1.5rem; margin: 10px 0;">⬇ IPC / HTTP / WebSocket</div>
+            <div class="arch-layer rust">
+                <b>Rust Backend (Tauri)</b><br>
+                System Tray, Deep Links, VRAM Check, Window Management
+            </div>
+            <div style="font-size: 1.5rem; margin: 10px 0;">⬇ Sidecar Spawn</div>
+            <div class="arch-layer python">
+                <b>Python FastAPI Core (Port 8080)</b><br>
+                Qwen 3.5 LLM, Florence-2 Vision, Faster-Whisper STT, Piper TTS, LanceDB RAG
+            </div>
+        </div>
+        <p style="text-align: center; color: var(--text-muted); max-width: 700px; margin: 0 auto;">
+            All communication occurs over localhost. No external network calls except for initial model downloads and optional Supabase authentication.
+        </p>
+    </section>
+
+    <!-- FAQ Section -->
+    <section class="faq" id="faq">
+        <h2 class="section-title mono">FREQUENTLY <span class="text-cyan">ASKED</span></h2>
+        
+        <div class="faq-item glass-panel">
+            <div class="faq-question">
+                Is HackT completely offline?
+                <span>+</span>
+            </div>
+            <div class="faq-answer">
+                Yes. After initial installation and model downloads, HackT operates 100% offline. The only cloud dependency is Supabase Auth for user authentication (email + profile name only). All AI inference, threat detection, and vault storage occur locally on your hardware.
+            </div>
+        </div>
+
+        <div class="faq-item glass-panel">
+            <div class="faq-question">
+                What happens if I have less than 6GB VRAM?
+                <span>+</span>
+            </div>
+            <div class="faq-answer">
+                HackT automatically detects your VRAM at startup. If you have less than 6GB dedicated VRAM, Passive Mode will be locked. You can still use Active Mode, which runs Qwen 3.5 4B for chat and RAG queries without Florence-2 Vision or background monitoring.
+            </div>
+        </div>
+
+        <div class="faq-item glass-panel">
+            <div class="faq-question">
+                Does HackT send my code to the cloud?
+                <span>+</span>
+            </div>
+            <div class="faq-answer">
+                Absolutely not. Your code, conversations, and threat intelligence never leave your machine. The only data transmitted to our servers is your email and profile name for authentication via Google SSO. All AI processing happens locally via Qwen 3.5 and Florence-2.
+            </div>
+        </div>
+
+        <div class="faq-item glass-panel">
+            <div class="faq-question">
+                How do I install the VS Code / Chrome extensions?
+                <span>+</span>
+            </div>
+            <div class="faq-answer">
+                After installing HackT Runtime, open the Settings panel in the dashboard. Click "Install" next to IDE Integration or Browser Integration. This will redirect you to the respective extension marketplace. Once installed, the extensions will automatically connect to HackT on ports 8081 and 8082.
+            </div>
+        </div>
+
+        <div class="faq-item glass-panel">
+            <div class="faq-question">
+                Can I customize the AI models?
+                <span>+</span>
+            </div>
+            <div class="faq-answer">
+                Advanced users can replace the default Qwen 3.5 4B GGUF model with any compatible llama.cpp model. Place your custom model in the `models/` folder and update the path in the Python backend configuration. Note: VRAM requirements may vary with different models.
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <p class="mono">&copy; 2026 HackT Systems. Built for Windows 11.</p>
+        <div class="footer-links">
+            <a href="privacy.html">Privacy Policy</a>
+            <a href="https://github.com/yourusername/hackt-runtime" target="_blank">GitHub Repository</a>
+            <a href="#architecture">Documentation</a>
+        </div>
+        <div class="social-links">
+            <a href="mailto:priyanshuroy0912@gmail.com">Contact Chief Engineer</a>
+        </div>
+        <p style="margin-top: 30px; font-size: 0.75rem; color: #444;">
+            HackT Runtime v1.0.0 • Qwen 3.5 4B • Florence-2 Base • LanceDB • KùzuDB
+        </p>
+    </footer>
+
+    <script>
+        // Terminal Boot Sequence Animation
+        const terminal = document.getElementById('terminal-text');
+        const downloadBtns = document.getElementById('download-btns');
+        
+        const bootLines = [
+            "> Establishing secure local runtime...",
+            "> Bypassing cloud dependencies...",
+            "> Hardware check: VRAM detection initialized...",
+            "> Mounting LanceDB + KùzuDB vector graphs...",
+            "> Loading Qwen 3.5 4B (4-bit quantized)...",
+            "> <span class='text-cyan'>SYSTEM ONLINE. READY FOR OPERATOR LOGIN.</span>"
+        ];
+
+        let lineIndex = 0;
+        const bootSequence = setInterval(() => {
+            if (lineIndex < bootLines.length) {
+                terminal.innerHTML += `<br>${bootLines[lineIndex]}`;
+                terminal.scrollTop = terminal.scrollHeight;
+                lineIndex++;
+            } else {
+                clearInterval(bootSequence);
+                downloadBtns.style.display = 'flex';
+            }
+        }, 700);
+
+        // Scroll Reveal Animation for Feature Cards
+        const observerOptions = { threshold: 0.1, rootMargin: "0px 0px -50px 0px" };
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                    observer.unobserve(entry.target);
+                }
+            });
+        }, observerOptions);
+
+        document.querySelectorAll('.feature-card').forEach(card => observer.observe(card));
+
+        // FAQ Toggle
+        document.querySelectorAll('.faq-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const wasActive = item.classList.contains('active');
+                document.querySelectorAll('.faq-item').forEach(i => i.classList.remove('active'));
+                if (!wasActive) {
+                    item.classList.add('active');
+                }
+            });
+        });
+
+        // Smooth scroll for nav links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            });
+        });
+    </script>
+</body>
+</html>

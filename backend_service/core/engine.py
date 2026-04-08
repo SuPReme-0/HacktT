@@ -258,17 +258,53 @@ class SovereignEngine:
                 try:
                     logger.info(f"Engine: Booting Qwen 3.5 onto GPU... (Attempt {attempt + 1}/{max_retries})")
 
-                    llama_kwargs = {
-                        "model_path": str(model_path),
-                        "n_ctx": self.max_ctx,
-                        "n_batch": config.model.llm_n_batch,
-                        "n_threads": 4,
-                        "n_gpu_layers": -1,  # offload 100%
-                        "use_mmap": True,
-                        "verbose": False,
-                        "type_k": 8,         # 8‑bit KV cache
-                        "type_v": 8,
-                    }
+                    # ----------------------------------------------------------
+                    # DYNAMIC GPU / CPU FALLBACK DETECTION (Torch only)
+                    # ----------------------------------------------------------
+                    try:
+                        import torch
+                        gpu_available = torch.cuda.is_available()
+                    except (ImportError, Exception):
+                        # Torch not installed or no CUDA support
+                        gpu_available = False
+
+                    # Decide CPU fallback – no extra config dependency
+                    is_cpu_fallback = not gpu_available
+
+                    if is_cpu_fallback:
+                        # ==========================================
+                        # 🛡️ BULLETPROOF CPU CONFIG (Safe Mode)
+                        # ==========================================
+                        llama_kwargs = {
+                            "model_path": str(model_path),
+                            "n_ctx": 4096,
+                            "n_threads": 4,
+                            "n_gpu_layers": 0,       # 0 → CPU only
+                            "verbose": False,
+                        }
+                        logger.info("⚙️ Engine running in CPU fallback mode (no GPU detected).")
+                    else:
+                        # ==========================================
+                        # 🚀 HIGH-PERFORMANCE GPU CONFIG (CUDA)
+                        # ==========================================
+                        # Optional: read from config if available, else default -1
+                        try:
+                            gpu_layers = config.engine.llm.n_gpu_layers
+                        except (AttributeError, TypeError):
+                            gpu_layers = -1   # offload all possible layers
+
+                        llama_kwargs = {
+                            "model_path": str(model_path),
+                            "n_ctx": 4096,
+                            "n_batch": 512,
+                            "n_threads": 4,
+                            "n_gpu_layers": gpu_layers,
+                            "use_mmap": True,
+                            "verbose": False,
+                            "type_k": 8,             # 8‑bit KV cache
+                            "type_v": 8,
+                        }
+                        logger.info(f"🚀 Engine using GPU with {gpu_layers} layers offloaded.")
 
                     if self._flash_attn_enabled:
                         llama_kwargs["flash_attn"] = True

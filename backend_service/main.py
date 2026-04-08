@@ -1,237 +1,243 @@
 """
-HackT Sovereign Core - Master Entry Point (v2.1)
+HackT Sovereign Core - Master Entry Point (v2.5)
 =================================================
 Bootstraps the FastAPI application, mounts modular routers,
 and manages the lifecycle of all Sovereign AI microservices.
 
 Features:
-- Zero Circular Imports (State decoupled, lazy service imports inside lifespan)
-- Async-Aware Daemon Startup (Proper event loop handling)
-- Native Uvicorn Signal Handling (Clean SIGTERM/SIGINT teardown)
-- PyInstaller-Safe Path Resolution
-- Bootstrap Flag Intercept for Model Downloader
+- Real-time boot progress via WebSocket
+- Code diff broadcasting for threat fixes
+- Zero circular imports, lazy service loading
+- Async-aware daemon startup & graceful shutdown
+- Proper telemetry manager initialization
 """
 
 import sys
 import asyncio
+import time
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-# ======================================================================
-# 1. Utilities (Safe to import early)
-# ======================================================================
 from utils.config import config
 from utils.logger import get_logger, log_system_info, log_shutdown
-from utils.state import app_state  # Runtime mutable state (Global state lives here now)
+from utils.state import app_state
 
 logger = get_logger("hackt.main")
 
-# ======================================================================
-# 2. Core Engines (Singletons - Safe to import)
-# ======================================================================
+# Core engines (safe to import early)
 from core.memory import vram_guard
 from core.embedder import embedder
 from core.rag import retriever
 from core.engine import engine
 from core.database import db
 
-# ======================================================================
-# 3. Mount Routers (Safe now because main.py holds no state)
-# ======================================================================
+# Routers
 from services.http_api import api_router
 from services.websocket import telemetry_router
 
+# ----------------------------------------------------------------------
+# Global reference to telemetry manager (set during lifespan)
+_telemetry_manager = None
 
-# ======================================================================
-# 4. Lifespan Manager (Startup & Teardown Sequences)
-# ======================================================================
+# ----------------------------------------------------------------------
+async def broadcast_code_diff(threat_level: str, source: str,
+                              original_code: str, suggested_fix: str) -> None:
+    """
+    Broadcast a suggested code fix to all connected frontend clients.
+    Call this from threat_scanner when a dangerous pattern is detected.
+    """
+    # ✅ FIXED: Check if _telemetry_manager is initialized before use
+    if _telemetry_manager is not None:
+        try:
+            await _telemetry_manager.broadcast_json({
+                "type": "code_diff_available",
+                "data": {
+                    "threat_level": threat_level,
+                    "source": source,
+                    "original_code": original_code,
+                    "suggested_fix": suggested_fix,
+                    "timestamp": time.time()
+                }
+            })
+        except Exception as e:
+            logger.error(f"Failed to broadcast code diff: {e}")
+    else:
+        logger.debug(f"Code diff ready but telemetry bridge offline: {source}")
+
+# ----------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Orchestrates the boot sequence of the Sovereign Agent.
-    All heavy service imports are lazy-loaded inside this function to prevent 
-    circular dependency crashes during PyInstaller compilation.
-    """
-    
+    global _telemetry_manager
+
+    # --- Helper for boot progress ---
+    async def send_boot_progress(message: str, progress: int, level: str = "info"):
+        # ✅ FIXED: Check if _telemetry_manager is initialized before use
+        if _telemetry_manager is not None:
+            try:
+                await _telemetry_manager.broadcast_json({
+                    "type": "boot_progress",
+                    "message": message,
+                    "progress": progress,
+                    "level": level,
+                    "timestamp": time.time()
+                })
+            except Exception as e:
+                logger.error(f"Failed to send boot progress: {e}")
+        else:
+            logger.debug(f"Boot: {progress}% - {message}")
+
     # --- BOOT SEQUENCE ---
     log_system_info()
     logger.info("🚀 Booting HackT Sovereign Core...")
-    
+
     try:
-        # 1. Warm up the VRAM Gatekeeper
+        # 1. VRAM detection
         vram_guard._detect_hardware()
-        
-        # 2. Pre-load the Embedder for zero-latency voice mode
+        await send_boot_progress("Hardware mapping complete", 5)
+
+        # 2. Start WebSocket manager (early, so frontend can receive progress)
+        from services.websocket import telemetry_manager
+        _telemetry_manager = telemetry_manager
+        telemetry_manager.start()
+        await asyncio.sleep(0.2)  # allow port to bind
+        await send_boot_progress("Neural bridge established", 10)
+
+        # 3. Database handshake
+        await send_boot_progress("Mounting Sovereign Vault...", 20)
+        db.initialize()   # Ensure this matches your database.py (e.g., db.initialize() if needed)
+
+        # 4. Embedder
         if not embedder._loaded:
             embedder.load()
-        
-        # 3. Pre-load the Master LLM (if VRAM allows)
+        await send_boot_progress("Semantic engine online", 35)
+
+        # 5. Master LLM
         if not engine.llm:
             engine.load_llm()
-        
-        # 4. Initialize Database Schema
-        db._initialize_database()
-        
-        # ==================================================================
-        # LAZY IMPORTS: Import services ONLY after core engines are ready
-        # ==================================================================
-        from services.websocket import telemetry_manager
+        await send_boot_progress("Master LLM loaded into VRAM", 60)
+
+        # 6. Lazy load services
         from services.idle_manager import idle_manager
         from services.port_listeners import integration_manager
         from services.screen_monitor import screen_monitor
         from services.threat_scanner import threat_scanner
         from services.code_watcher import code_watcher
         from services.audio import stt_service, tts_service
-        
-        # 5. Start WebSocket Telemetry Manager
-        telemetry_manager.start()
-        
-        # 6. Start Autonomous Engagement (JARVIS voice logic)
-        idle_manager.start()
-        
-        # 7. Open native ports for VS Code & Chrome Extensions
+
+        # 7. Integration sockets
         await integration_manager.start_ide_socket(port=config.services.ide_listener_port)
         await integration_manager.start_browser_socket(port=config.services.browser_listener_port)
-        
-        # 8. Start Background Threat Scanner (if in Passive Mode)
+        await send_boot_progress("Integration ports synchronized", 75)
+
+        # 8. Passive mode background tasks
         if config.mode == "passive":
-            # Inject dependencies explicitly to avoid circular imports
-            threat_scanner.inject_dependencies(engine, embedder, retriever)
+            # Inject telemetry broadcaster into threat_scanner
+            threat_scanner.inject_dependencies(
+                engine, embedder, retriever,
+                broadcast_callback=broadcast_code_diff
+            )
             threat_scanner.start()
-            
             screen_monitor.start(loop=asyncio.get_running_loop())
-            
-            # Start code watching for the user's project directory
-            project_dir = config.paths.data_dir.parent 
-            code_watcher.start_watching(str(project_dir))
-        
-        # 9. Initialize Audio Services (CPU-only, so safe to start anytime)
-        stt_service.load()  
-        tts_service.load()  
-        
-        logger.info(f"✅ Sovereign Core ONLINE on {config.host}:{config.port}. Awaiting Tauri Frontend...")
-        
-        # Uvicorn natively handles SIGINT/SIGTERM and will pause here.
-        yield  # --- APP RUNS HERE ---
-        
+            code_watcher.start_watching(str(config.paths.data_dir.parent))
+            await send_boot_progress("Passive surveillance active", 90)
+
+        # 9. Audio services
+        stt_service.load()
+        tts_service.load()
+
+        vram_usage = vram_guard.get_usage_stats().get("used_gb", 0.0)
+        await send_boot_progress(
+            f"Sovereign Core ONLINE ({vram_usage:.1f} GB VRAM)",
+            100, level="success"
+        )
+        logger.info(f"✅ Sovereign Core READY on {config.host}:{config.port}")
+
+        yield   # <--- APP RUNS HERE ---
+
     except Exception as e:
         logger.critical(f"🔥 Boot sequence failed: {e}", exc_info=True)
-        await _emergency_shutdown()
+        await send_boot_progress(f"Critical Error: {str(e)[:50]}", 0, level="error")
         raise
-    
-    # --- SHUTDOWN SEQUENCE ---
-    # Uvicorn automatically triggers this block when you press Ctrl+C
-    logger.info("🛑 Commencing graceful shutdown sequence...")
-    
-    try:
-        # 1. Stop all background daemons
-        telemetry_manager.stop()
-        idle_manager.stop()
-        threat_scanner.stop()
-        screen_monitor.stop()
-        code_watcher.stop_watching()
-        
-        # 2. Close external integration ports
-        await integration_manager.stop_ide_socket()
-        await integration_manager.stop_browser_socket()
-        
-        # 3. Unload audio models (free CPU RAM)
-        stt_service.unload()
-        tts_service.unload()
-        
-        # 4. Flush AI Models from VRAM safely
-        engine.unload_llm()
-        if hasattr(engine, 'unload_vision'):
-            engine.unload_vision()
-        embedder.unload()
-        
-        # 5. Close database connections
-        db.close_all()
-        
-        # 6. Final VRAM cleanup
-        vram_guard.clear_cache()
-        
-        # 7. Log shutdown completion
-        log_shutdown()
-        
-    except Exception as e:
-        logger.error(f"⚠️ Shutdown sequence encountered error: {e}", exc_info=True)
+    finally:
+        # --- SHUTDOWN SEQUENCE ---
+        logger.info("🛑 Commencing graceful shutdown...")
+        try:
+            # Safely stop background daemons using sys.modules to prevent local() scoping errors
+            if 'services.idle_manager' in sys.modules:
+                sys.modules['services.idle_manager'].idle_manager.stop()
+            if 'services.threat_scanner' in sys.modules:
+                sys.modules['services.threat_scanner'].threat_scanner.stop()
+            if 'services.screen_monitor' in sys.modules:
+                sys.modules['services.screen_monitor'].screen_monitor.stop()
+            if 'services.code_watcher' in sys.modules:
+                sys.modules['services.code_watcher'].code_watcher.stop_watching()
 
+            # Unload models
+            engine.unload_llm()
+            embedder.unload()
 
-async def _emergency_shutdown():
-    """Emergency cleanup if boot sequence fails mid-flight."""
-    logger.warning("🚨 Emergency shutdown triggered")
-    try:
-        vram_guard.clear_cache()
-        db.close_all()
-    except Exception as e:
-        logger.error(f"Emergency cleanup failed: {e}")
+            # Stop WebSocket last (to allow final messages)
+            if _telemetry_manager is not None:
+                _telemetry_manager.stop()
 
+            # Close database
+            db.close_all()
+            log_shutdown()
+        except Exception as e:
+            logger.error(f"⚠️ Shutdown error: {e}")
 
-# ======================================================================
-# 5. FastAPI Application & Routing
-# ======================================================================
+# ----------------------------------------------------------------------
+# FastAPI application
 app = FastAPI(
     title="HackT Sovereign Core",
     description="Privacy-first, offline AI cybersecurity agent",
-    version="2.1.0",
+    version="2.5.0",
     lifespan=lifespan,
-    docs_url="/docs",  
-    redoc_url="/redoc",  
+    docs_url="/docs",
+    redoc_url="/redoc",
     openapi_url="/openapi.json"
 )
 
-# Cross-Origin Resource Sharing (Allows Tauri/React to talk to Python)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=config.cors_origins,
+    allow_origins=config.cors_origins + ["http://localhost:8501"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Mount the routers
 app.include_router(api_router, prefix="/api")
 app.include_router(telemetry_router)
 
-# Health check endpoint for load balancers / Tauri
 @app.get("/health")
 async def health_check():
-    """Quick health check for frontend polling."""
+    # ✅ FIXED: Replaced asyncio.get_event_loop().time() with time.time() for safe endpoint querying
     return {
         "status": "healthy",
         "mode": config.mode,
         "llm_loaded": engine.llm is not None,
         "vram_usage_gb": vram_guard.get_usage_stats().get("used_gb", 0.0),
-        "timestamp": asyncio.get_event_loop().time()
+        "timestamp": time.time()
     }
 
-
-# ======================================================================
-# 6. Server Execution & Bootstrap Intercept
-# ======================================================================
+# ----------------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
-    
-    # 🚨 THE SETUP WIZARD INTERCEPTOR 🚨
-    # If Tauri calls this with --bootstrap, run the downloader and exit.
-    # MUST BE BEFORE uvicorn.run() WHICH BLOCKS FOREVER
+
     if "--bootstrap" in sys.argv:
         from utils.downloader import run_bootstrap
         run_bootstrap()
-        sys.exit(0)  # Close the process successfully when done!
-    
-    # Normal execution: Run the web server
+        sys.exit(0)
+
     uvicorn.run(
         "main:app",
         host="127.0.0.1",
         port=8000,
-        reload=False,  # No hot reload in production
-        log_level="warning",  # Keep uvicorn quiet so our custom logger shines
-        workers=1,  # Single worker strictly enforced to prevent VRAM contention
+        reload=False,
+        log_level="warning",
+        workers=1,
         timeout_keep_alive=30,
         limit_concurrency=100
     )

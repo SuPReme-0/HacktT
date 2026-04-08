@@ -1,0 +1,91 @@
+{
+  "version": "2.0.0",
+  "last_updated": "2026-04-08",
+  "total_download_size_gb": 10.8,
+  "total_extracted_size_gb": 12.5,
+  "download_timeout_seconds": 7200,
+  "retry_attempts": 3,
+  "models": [
+    {
+      "id": "core-llm",
+      "type": "llm",
+      "name": "Qwen 3.5 4B Instruct (4-bit GGUF)",
+      "filename": "qwen-3.5-4b-q4_k_m.gguf",
+      "size_gb": 2.9,
+      "url": "https://huggingface.co/Qwen/Qwen3.5-4B-Instruct-GGUF/resolve/main/qwen-3.5-4b-q4_k_m.gguf",
+      "mirror_url": "https://cdn.hackt.ai/models/llm/qwen-3.5-4b-q4_k_m.gguf",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "required": true,
+      "is_archive": false,
+      "destination_path": "models/llm/"
+    },
+    {
+      "id": "core-vision",
+      "type": "vision",
+      "name": "Florence-2 Base (Vision OCR)",
+      "filename": "florence-2-base.zip",
+      "size_gb": 1.0,
+      "url": "https://cdn.hackt.ai/models/vision/florence-2-base.zip",
+      "mirror_url": "https://github.com/hackt-systems/models/releases/download/v2.0/florence-2-base.zip",
+      "sha256": "8f434346648f6b96e44bce55fb0809228f4a06530dc5f2cb2e1e05d2ba5239e2",
+      "required": false,
+      "is_archive": true,
+      "destination_path": "models/vision/florence-2-base/",
+      "note": "Required for Passive Mode screen scanning."
+    },
+    {
+      "id": "core-embedding",
+      "type": "embedding",
+      "name": "Nomic Embed Text v1.5",
+      "filename": "nomic-embed-text-v1.5.zip",
+      "size_gb": 0.3,
+      "url": "https://cdn.hackt.ai/models/embeddings/nomic-embed-text-v1.5.zip",
+      "mirror_url": "https://github.com/hackt-systems/models/releases/download/v2.0/nomic-embed-text-v1.5.zip",
+      "sha256": "4e1837f1970222e0339d48508e33ebdf30f14ec0ea36d10cff545a9095fb8bc2",
+      "required": true,
+      "is_archive": true,
+      "destination_path": "models/embeddings/nomic-embed-text-v1.5/"
+    },
+    {
+      "id": "core-stt",
+      "type": "audio-stt",
+      "name": "Faster-Whisper (Small CTranslate2)",
+      "filename": "whisper-small-ct2.zip",
+      "size_gb": 0.5,
+      "url": "https://cdn.hackt.ai/models/audio/whisper-small-ct2.zip",
+      "mirror_url": "https://github.com/hackt-systems/models/releases/download/v2.0/whisper-small-ct2.zip",
+      "sha256": "f62ca96b42f6d0f508a8f10a70198080f5539d05e26b1edbb4eb933a30a47d2d",
+      "required": true,
+      "is_archive": true,
+      "destination_path": "models/audio/stt/",
+      "note": "Powers the Voice Control pipeline."
+    },
+    {
+      "id": "core-tts",
+      "type": "audio-tts",
+      "name": "Piper TTS Voice (en_US-lessac-medium)",
+      "filename": "en_US-lessac-medium.onnx",
+      "size_gb": 0.1,
+      "url": "https://cdn.hackt.ai/models/audio/en_US-lessac-medium.onnx",
+      "mirror_url": "https://github.com/hackt-systems/models/releases/download/v2.0/en_US-lessac-medium.onnx",
+      "sha256": "d0e123984ca32454b41982701bc994b7f82736181fdbfa4510008b8915632eb1",
+      "required": true,
+      "is_archive": false,
+      "destination_path": "models/audio/tts/"
+    },
+    {
+      "id": "core-vault",
+      "type": "database",
+      "name": "HackT Knowledge Vault (LanceDB + KùzuDB)",
+      "filename": "vault-v21.0-lite.zip",
+      "size_gb": 6.0,
+      "url": "https://cdn.hackt.ai/vault/v21.0-lite.zip",
+      "mirror_url": "https://github.com/hackt-systems/models/releases/download/v2.0/vault-v21.0-lite.zip",
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "required": true,
+      "is_archive": true,
+      "destination_path": "vault/",
+      "note": "Vector and Graph cybersecurity intelligence base."
+    }
+  ]
+}

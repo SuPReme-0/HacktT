@@ -44,13 +44,15 @@ class ThreatScanner:
         # 🚀 OPTIMIZATION: Per-File Content Hash Caching
         self._last_scan_hashes: Dict[str, str] = {}
         self.max_context_chars = config.rag.max_context_chars // 2  # Sync with RAG config
+        self.broadcast_callback = None  # For broadcasting alerts without direct WebSocket dependency
 
-    def inject_dependencies(self, engine, embedder, retriever):
-        """Cleanly inject singletons to avoid circular imports."""
+    def inject_dependencies(self, engine, embedder, retriever, broadcast_callback=None):
+        """Cleanly inject singletons and the UI broadcast bridge."""
         self.engine = engine
         self.embedder = embedder
         self.retriever = retriever
-        logger.info("ThreatScanner: Dependencies injected successfully.")
+        self.broadcast_callback = broadcast_callback
+        logger.info("ThreatScanner: Dependencies & Broadcast Bridge injected.")
 
     def _get_content_hash(self, content: str) -> str:
         """Returns a SHA-256 hash to detect changes in context."""
@@ -200,12 +202,14 @@ class ThreatScanner:
                 assessment = json.loads(clean_result)
                 
                 # Alert if threat detected
+                # Alert if threat detected
                 if assessment.get("threat_level") in ["HIGH", "CRITICAL"]:
+                    # ✅ FIXED: Use the unified internal _send_alert method
                     await self._send_alert(
                         threat_level=assessment["threat_level"],
-                        source=f"{source}:{file_identifier}",
-                        description=assessment.get("explanation", "Threat detected."),
-                        original_code=content[:self.max_context_chars],  # Pass only code, not terminal to diff
+                        source=file_identifier,
+                        description=assessment.get("explanation", "Critical security vulnerability detected."),
+                        original_code=content[:self.max_context_chars],
                         suggested_fix=assessment.get("suggested_fix", "")
                     )
 
@@ -221,32 +225,28 @@ class ThreatScanner:
                           original_code: str = "", suggested_fix: str = ""):
         """
         Send threat alert to React via telemetry WebSocket.
-        Implements Dual-Broadcast: Standard Alert (Banner) + Diff Payload (Modal).
+        Utilizes the injected broadcast_callback for code diffs.
         """
-        if not telemetry_manager:
-            return
-
-        # 1. Standard Alert (Top Banner Notification)
-        await telemetry_manager.send_threat_alert(
-            threat_level=threat_level,
-            source=source,
-            description=description
-        )
+        # 1. Standard Telemetry Alert (For the sidebar/banner)
+        if telemetry_manager:
+            await telemetry_manager.send_threat_alert(
+                threat_level=threat_level,
+                source=source,
+                description=description
+            )
         
-        # 2. Diff Bridge Payload (Triggers the Code Diff Modal)
-        await telemetry_manager.broadcast_json({
-            "type": "code_diff_available",
-            "data": {
-                "threat_level": threat_level,
-                "source": source,
-                "original_code": original_code,
-                "suggested_fix": suggested_fix,
-                "timestamp": asyncio.get_event_loop().time()
-            }
-        })
-
-        logger.warning(f"Threat alert broadcasted: {threat_level} - {source}")
-
+        # 2. 🚀 THE DIFF BRIDGE (For the Code Fix Modal)
+        # Use the callback injected by main.py
+        if self.broadcast_callback:
+            await self.broadcast_callback(
+                threat_level=threat_level,
+                source=source,
+                original_code=original_code,
+                suggested_fix=suggested_fix
+            )
+        
+        logger.warning(f"⚠️ THREAT DETECTED: {threat_level} in {source}")
+        
     async def scan_now(self, content: str, source: str = "manual", 
                        file_identifier: str = "manual_scan") -> Dict:
         """
