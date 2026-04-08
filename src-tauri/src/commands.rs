@@ -32,21 +32,19 @@ pub struct BackendLog {
 
 #[tauri::command]
 pub async fn run_model_bootstrapper(window: Window) -> Result<String, String> {
-    // Resolve the backend executable path with fallback for dev/prod
     let backend_exe = window.app_handle().path_resolver()
         .resolve_resource("resources/hackt_sovereign_core/hackt_sovereign_core.exe")
         .or_else(|| window.app_handle().path_resolver().resolve_resource("hackt_sovereign_core.exe"))
         .ok_or("Failed to locate backend executable in resources")?;
 
     let mut child = Command::new(&backend_exe)
-        .arg("--bootstrap") // 🔥 Tells main.py to download models instead of starting the server
+        .arg("--bootstrap") 
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         // .creation_flags(0x08000000) // Uncomment on Windows to hide the console window
         .spawn()
         .map_err(|e| format!("Failed to spawn bootstrapper: {}", e))?;
 
-    // Take stdout/stderr BEFORE spawning threads to avoid moving child
     let stdout = child.stdout.take()
         .ok_or("Failed to capture bootstrapper stdout")?;
     let stderr = child.stderr.take()
@@ -56,7 +54,6 @@ pub async fn run_model_bootstrapper(window: Window) -> Result<String, String> {
     let window_clone_err = window.clone();
     let window_clone_finish = window.clone();
 
-    // Stream stdout to React
     thread::spawn(move || {
         let reader = BufReader::new(stdout);
         for line in reader.lines().map_while(Result::ok) {
@@ -64,7 +61,6 @@ pub async fn run_model_bootstrapper(window: Window) -> Result<String, String> {
         }
     });
 
-    // Stream stderr to React
     thread::spawn(move || {
         let reader = BufReader::new(stderr);
         for line in reader.lines().map_while(Result::ok) {
@@ -74,7 +70,6 @@ pub async fn run_model_bootstrapper(window: Window) -> Result<String, String> {
         }
     });
 
-    // 🔥 FIX: Wait for the process in a detached background thread to prevent UI freezing
     thread::spawn(move || {
         match child.wait() {
             Ok(status) if status.success() => {
@@ -93,7 +88,7 @@ pub async fn run_model_bootstrapper(window: Window) -> Result<String, String> {
 }
 
 // ==============================================================================
-// 2. SPAWN MAIN PYTHON BACKEND (Manual Start after setup)
+// 2. SPAWN MAIN PYTHON BACKEND
 // ==============================================================================
 
 #[tauri::command]
@@ -115,14 +110,11 @@ pub fn spawn_python_backend(
 
     let pid = child.id();
 
-    // Stream backend logs to React (with graceful window access)
     if let Some(stdout) = child.stdout.take() {
-        // Clone app_handle instead of window to avoid borrow issues
         let app_handle_clone = app_handle.clone();
         thread::spawn(move || {
             let reader = BufReader::new(stdout);
             for line in reader.lines().map_while(Result::ok) {
-                // Try to get window, but don't panic if it's not ready
                 if let Some(window) = app_handle_clone.get_window("main") {
                     let _ = window.emit("backend_log", BackendLog { text: line });
                 }
@@ -130,8 +122,8 @@ pub fn spawn_python_backend(
         });
     }
 
-    // 🔥 FIX: Lock the Mutex and store the child process so we can kill it when the app exits
-    let mut backend_guard = state.0.lock().map_err(|e| format!("Failed to lock backend state: {}", e))?;
+    // ✅ FIX: Use .inner() to extract the true reference, avoiding the lifetime error
+    let mut backend_guard = state.inner().0.lock().map_err(|e| format!("Failed to lock backend state: {}", e))?;
     *backend_guard = Some(child);
 
     Ok(format!("AI Core Initialized. PID: {}", pid))
@@ -143,7 +135,6 @@ pub fn spawn_python_backend(
 
 #[tauri::command]
 pub async fn trigger_google_auth(window: Window) -> Result<String, String> {
-    // 🚀 Make this configurable via tauri.conf.json or env vars in production
     let supabase_auth_url = option_env!("SUPABASE_AUTH_URL")
         .unwrap_or("https://YOUR_PROJECT_ID.supabase.co/auth/v1/authorize?provider=google&redirect_to=hackt://auth-callback");
     
@@ -159,7 +150,6 @@ pub fn generate_new_session() -> String {
 
 #[tauri::command]
 pub async fn close_splashscreen(window: Window) {
-    // Gracefully handle missing windows instead of unwrap()
     if let Some(splashscreen) = window.get_window("splashscreen") {
         let _ = splashscreen.close();
     }
@@ -182,13 +172,12 @@ pub async fn get_system_info() -> Result<serde_json::Value, String> {
 // 4. APP EXIT HOOK (Kill Python Backend)
 // ==============================================================================
 
-/// Call this from your Tauri `on_window_event` or `setup` hook to ensure
-/// the Python backend is killed when the app exits.
 pub fn kill_backend_on_exit(app_handle: &tauri::AppHandle) {
     let state = app_handle.state::<BackendState>();
-    if let Ok(mut backend_guard) = state.0.lock() {
+    
+    // ✅ FIX: Use .inner() to satisfy the borrow checker
+    if let Ok(mut backend_guard) = state.inner().0.lock() {
         if let Some(mut child) = backend_guard.take() {
-            // Try graceful termination first
             let _ = child.kill();
             let _ = child.wait();
         }

@@ -49,7 +49,6 @@ fn mark_setup_complete(app_handle: tauri::AppHandle) -> Result<(), String> {
 
 fn main() {
     // Register the custom protocol handler BEFORE the app boots
-    // ✅ FIX: prepare() returns (), not Result
     tauri_plugin_deep_link::prepare("com.hackt.runtime");
 
     tauri::Builder::default()
@@ -77,9 +76,9 @@ fn main() {
                 "quit" => {
                     println!("🛑 OS-Level Shutdown sequence initiated...");
                     
-                    // 🔥 FIX: Absolute OS-level termination with graceful mutex handling
+                    // ✅ FIX: Use .inner() to satisfy the borrow checker during tray shutdown
                     let state = app.state::<commands::BackendState>();
-                    if let Ok(mut backend_guard) = state.0.lock() {
+                    if let Ok(mut backend_guard) = state.inner().0.lock() {
                         if let Some(mut child) = backend_guard.take() {
                             let _ = child.kill();
                             let _ = child.wait();
@@ -110,24 +109,18 @@ fn main() {
         })
 
         // ==============================================================================
-        // 5. INJECT DEEP LINK PLUGIN
-        // ==============================================================================
-        // ✅ FIX: Use the builder pattern to get a TauriPlugin from register()
-        .plugin({
-            // register() returns Result<()>, so we need to handle it and return a plugin
-            let _ = tauri_plugin_deep_link::register("hackt", |request| {
-                // Handle incoming deep link requests
-                println!("🔗 Deep link received: {}", request);
-                // You can emit an event to the frontend here
-            });
-            // Return the plugin instance (the plugin is already registered globally)
-            tauri_plugin_deep_link::init()
-        })
-        
-        // ==============================================================================
-        // 6. LIFECYCLE & STARTUP HOOKS
+        // 5. LIFECYCLE & STARTUP HOOKS (Deep Link Registered Here)
         // ==============================================================================
         .setup(|app| {
+            let handle = app.handle();
+
+            // ✅ FIX: Deep link registration belongs in setup(), not as a plugin()
+            let _ = tauri_plugin_deep_link::register("hackt", move |request| {
+                println!("🔗 Deep link received: {}", request);
+                // Broadcast to React
+                let _ = handle.emit_all("oauth_callback", request);
+            });
+
             // App data directory and setup flag
             let app_dir = app.path_resolver().app_data_dir().unwrap_or_default();
             let _ = std::fs::create_dir_all(&app_dir);
@@ -140,8 +133,6 @@ fn main() {
                 if let Some(window) = app.get_window("main") {
                     let _ = window.eval("window.location.hash = '/setup'");
                     
-                    // 🔥 FIX: Ensure the window shows up since it starts hidden!
-                    // Use a small timeout to ensure the window is ready
                     let window_clone = window.clone();
                     std::thread::spawn(move || {
                         std::thread::sleep(std::time::Duration::from_millis(100));
@@ -149,35 +140,19 @@ fn main() {
                         let _ = window_clone.set_focus();
                     });
                     
-                    // 🔥 AND THIS: Close the splashscreen if it's open
                     if let Some(splash) = app.get_window("splashscreen") {
                         let _ = splash.close();
                     }
                 }
             }
 
-            // Listen for incoming Google OAuth deep links (legacy fallback)
-            let handle = app.handle();
-            app.listen_global("scheme-request-received", move |event| {
-                if let Some(payload) = event.payload() {
-                    println!("🔗 Intercepted Deep Link (legacy): {}", payload);
-                    // ✅ FIX: Proper null check for window access
-                    if let Some(window) = handle.get_window("main") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
-                    let _ = handle.emit_all("oauth_callback", payload);
-                }
-            });
-
             Ok(())
         })
         
         // ==============================================================================
-        // 7. IPC COMMAND REGISTRATION 
+        // 6. IPC COMMAND REGISTRATION 
         // ==============================================================================
         .invoke_handler(tauri::generate_handler![
-            // 🔥 FIX: Only register commands that actually exist in the new commands.rs
             commands::run_model_bootstrapper,
             commands::spawn_python_backend,
             commands::trigger_google_auth,
