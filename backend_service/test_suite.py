@@ -6,8 +6,8 @@ Simulates the exact lifecycle of the Tauri frontend talking to the v5.1 API.
 Features:
 - Native Microphone Recording -> STT -> LLM Stream -> TTS
 - Live "Brain Logs" showing RAG Citations and Token telemetry
+- 🌟 NEW: Modal Popup Dialog for final output
 - Independent API Diagnostic endpoints
-- Fully synced to the Lean v5.1 REST Architecture
 """
 
 import streamlit as st
@@ -54,6 +54,22 @@ def parse_sse_line(line: str) -> Optional[dict]:
         return None
 
 # ══════════════════════════════════════════════════════════════════════════════
+# POPUP DIALOG DEFINITION
+# ══════════════════════════════════════════════════════════════════════════════
+@st.dialog("✅ Sovereign Execution Complete", width="large")
+def show_final_popup(prompt: str, response: str, audio_bytes: Optional[bytes]):
+    """Creates a modal popup over the UI to display the final result."""
+    st.markdown("### 🗣️ You Said:")
+    st.info(prompt)
+    
+    st.markdown("### 🤖 HackT Responded:")
+    st.success(response)
+    
+    if audio_bytes:
+        st.markdown("### 🔊 Audio Synthesis:")
+        st.audio(audio_bytes, format="audio/wav", autoplay=True)
+
+# ══════════════════════════════════════════════════════════════════════════════
 # MAIN LAYOUT
 # ══════════════════════════════════════════════════════════════════════════════
 st.markdown("""
@@ -75,7 +91,6 @@ with tabs[0]:
     
     with col_input:
         st.markdown("### 1. Audio Input")
-        # Native Streamlit audio recorder (Streamlit 1.36+)
         audio_data = st.audio_input("Record your command")
         
         st.markdown("### OR Text Input")
@@ -100,7 +115,6 @@ with tabs[0]:
                 stream_ui.markdown('<div class="stream-box">🎧 Sending audio to Whisper STT...</div>', unsafe_allow_html=True)
                 try:
                     start_stt = time.time()
-                    # Send raw bytes to the API
                     res_stt = requests.post(f"{BASE_URL}/audio/transcribe", data=audio_data.getvalue(), timeout=TIMEOUT)
                     res_stt.raise_for_status()
                     prompt_text = res_stt.json().get("text", "")
@@ -140,19 +154,15 @@ with tabs[0]:
                             token = parsed.get("token", "")
                             full_response += token
                             
-                            # Capture citations for logs
                             cits = parsed.get("citations", [])
                             if cits and not citations_found:
                                 citations_found = cits
                                 
-                            # Update UI
                             stream_ui.markdown(f'<div class="stream-box">{full_response}▌</div>', unsafe_allow_html=True)
                 
-                # Finalize UI
                 llm_time = (time.time() - start_llm) * 1000
                 stream_ui.markdown(f'<div class="stream-box">{full_response}</div>', unsafe_allow_html=True)
                 
-                # Update Logs
                 cit_html = "<br>".join(citations_found) if citations_found else "No context retrieved."
                 log_ui.markdown(
                     f'<div class="log-box">'
@@ -168,13 +178,14 @@ with tabs[0]:
             # --- PHASE 3: TTS (Text to Speech) ---
             stream_ui.markdown(f'<div class="stream-box">{full_response}\n\n🔊 Generating Voice...</div>', unsafe_allow_html=True)
             
+            final_audio_bytes = None
             try:
                 start_tts = time.time()
-                # Limit TTS text to prevent huge delays during testing
                 tts_text = full_response[:500] 
                 res_tts = requests.post(f"{BASE_URL}/tts", json={"text": tts_text}, timeout=TIMEOUT)
                 res_tts.raise_for_status()
                 
+                final_audio_bytes = res_tts.content
                 tts_time = (time.time() - start_tts) * 1000
                 stream_ui.markdown(f'<div class="stream-box">{full_response}</div>', unsafe_allow_html=True)
                 log_ui.markdown(
@@ -183,12 +194,12 @@ with tabs[0]:
                     f'</div>', 
                     unsafe_allow_html=True
                 )
-                
-                # Play Audio
-                audio_ui.audio(res_tts.content, format="audio/wav", autoplay=True)
-                
             except Exception as e:
                 audio_ui.error(f"TTS Failed: {e}")
+
+            # --- PHASE 4: TRIGGER POPUP DIALOG ---
+            # This dims the background and pushes the final summary to the front!
+            show_final_popup(prompt_text, full_response, final_audio_bytes)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 2 ─ API DIAGNOSTICS
