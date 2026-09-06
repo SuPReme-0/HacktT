@@ -19,10 +19,13 @@
 # 2. AI MODELS & KNOWLEDGE VAULT (LOCAL SOVEREIGNTY)
 # -----------------------------------------------------------------------------
 # Preserve the nested models/ folder structure but ignore the gigabytes of weights
+backend/models/*
+!backend/models/.gitkeep
 backend_service/models/*
 !backend_service/models/.gitkeep
 
 # Knowledge Vault & Database files
+backend/data/
 backend_service/data/
 *.lance
 *.lance/
@@ -34,6 +37,8 @@ backend_service/data/
 **/__index__/**
 _temp_index/
 index.zip
+backend/models/bm25_index.pkl
+backend/models/file_summaries.json
 backend_service/models/bm25_index.pkl
 backend_service/models/file_summaries.json
 
@@ -41,10 +46,14 @@ backend_service/models/file_summaries.json
 # 3. FRONTEND (React + Vite + TypeScript)
 # -----------------------------------------------------------------------------
 node_modules/
+frontend/node_modules/
 dist/
+frontend/dist/
 dist-ssr/
-build/
+frontend/dist-ssr/
+frontend/build/
 .vite/
+frontend/.vite/
 .eslintcache
 
 # Logs & Lockfiles (Remove lockfiles from here if you prefer reproducible CI/CD builds)
@@ -60,15 +69,19 @@ pnpm-lock.yaml
 # 4. RUST + TAURI (OS Layer)
 # -----------------------------------------------------------------------------
 # Build artifacts
+frontend/src-tauri/target/
 src-tauri/target/
 **/target/
+frontend/src-tauri/binaries/
 src-tauri/binaries/
 
 # Bundled Python folder (Derived artifact; prevents adding 300MB+ per commit)
+frontend/src-tauri/resources/hackt_sovereign_core/
 src-tauri/resources/hackt_sovereign_core/
 
 # Rust internals
 **/*.rs.bk
+frontend/src-tauri/app.manifest.bak
 src-tauri/app.manifest.bak
 Cargo.lock # Remove if you want strict dependency locking in Git
 
@@ -76,9 +89,10 @@ Cargo.lock # Remove if you want strict dependency locking in Git
 # 5. PYTHON BACKEND (AI Core)
 # -----------------------------------------------------------------------------
 # PyInstaller build artifacts
+backend/build/
+backend/dist/
 backend_service/build/
 backend_service/dist/
-backend_service/*.spec
 
 # Cache & Compiled Files
 __pycache__/
@@ -166,3 +180,17 @@ temp/
 *.tmp
 *.temp
 .cache/
+
+# -----------------------------------------------------------------------------
+# 9. ARCHIVES & COMPRESSED PACKAGES (Prevent committing large tarballs/zips)
+# -----------------------------------------------------------------------------
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.7z
+*.rar
+*.gz
+*.bz2
+*.xz
+*.zst

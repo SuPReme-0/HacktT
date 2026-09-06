@@ -1,0 +1,85 @@
+HACKT RUNTIME END USER LICENSE AGREEMENT (EULA)
+Version 1.0.2 – Last Updated: April 2026
+
+IMPORTANT: PLEASE READ THIS AGREEMENT CAREFULLY BEFORE INSTALLING OR USING 
+HACKT RUNTIME SOFTWARE. BY INSTALLING OR USING THIS SOFTWARE, YOU AGREE TO 
+BE BOUND BY THE TERMS OF THIS AGREEMENT.
+
+1. LICENSE GRANT
+HackT Systems grants you a limited, non-exclusive, non-transferable, and 
+revocable license to install and use HackT Runtime on your personal Windows 
+device for personal, educational, or commercial internal security purposes.
+
+2. DATA PRIVACY, SOVEREIGNTY, & LOCAL PROCESSING
+2.1 All primary AI inference (including Qwen LLM and Florence-2 Vision) 
+    executes 100% locally on your hardware.
+2.2 No conversations, code snippets, proprietary screen captures, or internal 
+    network telemetry are transmitted to HackT Systems servers. 
+2.3 You retain absolute sovereignty over your local Knowledge Vault data.
+2.4 If you choose to enable Cloud Sync, only encrypted chat history backups, 
+    account email, and public profile data are stored via our secure third-party 
+    provider (Supabase).
+2.5 LOCAL NETWORK INSPECTION: If the Network Proxy feature is enabled, all packet 
+    inspection, phishing detection, and DOM analysis occur strictly within your 
+    device's local memory. No decrypted HTTPS traffic, browsing history, or packet 
+    payloads are ever transmitted to HackT Systems.
+
+3. SYSTEM PERMISSIONS & HARDWARE
+By installing HackT Runtime, you acknowledge the software requires deep OS access:
+3.1 Screen Capture: Required for real-time OCR and Sentinel passive monitoring.
+3.2 Microphone Access: Required for voice command transcription.
+3.3 Administrator Privileges: Required for OS-level keyboard injection and 
+    automated vulnerability patching.
+3.4 HackT Systems is not responsible for hardware degradation, thermal throttling, 
+    or incompatibilities resulting from high VRAM/CPU usage during AI inference.
+
+4. ACCEPTABLE USE POLICY (AUP)
+HackT Runtime is a defensive security and educational tool. You agree NOT to use 
+the software to:
+4.1 Audit, scan, or inject code into networks, applications, or systems for 
+    which you do not have explicit, written authorization.
+4.2 Generate malicious payloads, ransomware, or offensive exploits intended to 
+    cause harm.
+4.3 Reverse engineer or bypass the software's VRAM Guard or safety constraints.
+
+5. SECURITY DISCLAIMERS & LIMITATION OF LIABILITY
+5.1 NO GUARANTEE OF SECURITY: HackT Runtime provides AI-assisted threat detection, 
+    but it is not infallible. It does not guarantee 100% security coverage, nor 
+    does it replace professional security auditing.
+5.2 AI HALLUCINATIONS: Artificial Intelligence may produce inaccurate, incomplete, 
+    or harmful code suggestions. You are strictly responsible for verifying all 
+    AI-generated code fixes before deployment.
+5.3 LIMITATION OF LIABILITY: To the maximum extent permitted by law, in no event 
+    shall HackT Systems be liable for any indirect, incidental, special, or 
+    consequential damages (including loss of data, system bricking, or business 
+    interruption) arising out of the use or inability to use the software.
+5.4 INDEMNIFICATION: You agree to indemnify, defend, and hold harmless HackT 
+    Systems and its creator(s) from any claims, lawsuits, damages, or liabilities 
+     arising from your use of the software, including but not limited to 
+    unauthorized network scanning, deployment of AI-generated patches that cause 
+    system failure, or violations of the Acceptable Use Policy.
+
+6. OPEN SOURCE COMPONENTS
+This software utilizes the following open-source projects under their respective 
+licenses: Qwen (Apache 2.0), Florence-2 (MIT), Faster-Whisper (MIT), Piper TTS 
+(MIT), LanceDB (Apache 2.0), KùzuDB (MIT), Tauri (Apache 2.0/MIT). 
+
+7. TERMINATION
+HackT Systems reserves the right to terminate this license immediately if you 
+fail to comply with any term of this EULA, particularly the Acceptable Use Policy.
+
+8. UPDATES & MODIFICATIONS
+HackT Systems may update this EULA at any time. Continued use after updates 
+constitutes acceptance of modified terms.
+
+9. CONTACT INFORMATION
+For questions about this EULA, contact:
+Email: priyanshuroy0912@gmail.com
+GitHub: https://github.com/SuPReme-0/HacktT
+
+10. GOVERNING LAW
+This agreement is governed by the laws of your jurisdiction.
+
+BY CLICKING "I ACCEPT", YOU ACKNOWLEDGE THAT YOU HAVE READ, UNDERSTOOD, AND 
+AGREE TO BE BOUND BY THIS AGREEMENT. YOU ASSUME ALL RISKS ASSOCIATED WITH 
+AUTOMATED AI CODE INJECTION.

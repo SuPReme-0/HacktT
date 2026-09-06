@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    
+    <!-- Security: Content Security Policy for Tauri -->
+    <meta http-equiv="Content-Security-Policy" 
+          content="default-src 'self'; 
+                   script-src 'self' 'unsafe-inline' 'unsafe-eval'; 
+                   style-src 'self' 'unsafe-inline'; 
+                   img-src 'self' data: https:; 
+                   font-src 'self'; 
+                   connect-src 'self' ws://127.0.0.1:* http://127.0.0.1:*; 
+                   media-src 'self' blob:;">
+    
+    <!-- App Metadata -->
+    <title>HackT Sovereign Core</title>
+    <meta name="description" content="Privacy-first, offline AI cybersecurity agent" />
+    <meta name="theme-color" content="#030305" />
+    
+    <!-- Preload Critical Assets -->
+    <link rel="preload" href="/src/styles/globals.css" as="style" />
+    <link rel="stylesheet" href="/src/styles/globals.css" />
+    
+    <!-- Font Loading (JetBrains Mono for cyberpunk aesthetic) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  </head>
+  <body class="bg-[#030305] text-[#e0e0e0] font-mono antialiased">
+    <!-- React Mount Point -->
+    <div id="root"></div>
+    
+    <!-- Vite Entry Point -->
+    <script type="module" src="/src/main.tsx"></script>
+    
+    <!-- Tauri API (auto-injected by Tauri CLI) -->
+    <!-- <script src="/tauri.js"></script> -->
+  </body>
+</html>

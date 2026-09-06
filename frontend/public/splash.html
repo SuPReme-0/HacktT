@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HackT Sovereign Core</title>
+  <style>
+    :root {
+      --bg-deep: #030305;
+      --accent-cyan: #00f3ff;
+      --accent-purple: #bc13fe;
+      --text-primary: #e0e0e0;
+    }
+    
+    body {
+      background-color: var(--bg-deep);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+      overflow: hidden;
+      font-family: 'JetBrains Mono', 'Inter', monospace;
+      color: var(--text-primary);
+    }
+    
+    /* Animated Background Grid */
+    body::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image: 
+        linear-gradient(rgba(0, 243, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 243, 255, 0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      animation: grid-move 20s linear infinite;
+      pointer-events: none;
+      z-index: -1;
+    }
+    
+    @keyframes grid-move {
+      0% { background-position: 0 0; }
+      100% { background-position: 40px 40px; }
+    }
+    
+    /* Logo Container */
+    .logo-container {
+      position: relative;
+      margin-bottom: 2rem;
+    }
+    
+    .logo-glow {
+      position: absolute;
+      inset: -20px;
+      background: radial-gradient(circle, rgba(0, 243, 255, 0.3) 0%, transparent 70%);
+      animation: pulse-glow 2s ease-in-out infinite;
+      border-radius: 50%;
+      pointer-events: none;
+    }
+    
+    @keyframes pulse-glow {
+      0%, 100% { opacity: 0.5; transform: scale(1); }
+      50% { opacity: 1; transform: scale(1.1); }
+    }
+    
+    .logo {
+      width: 200px;
+      height: 200px;
+      position: relative;
+      z-index: 1;
+      animation: logo-float 3s ease-in-out infinite;
+      filter: drop-shadow(0 0 20px rgba(0, 243, 255, 0.5));
+    }
+    
+    @keyframes logo-float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-10px); }
+    }
+    
+    /* Loading Text */
+    .loading-text {
+      font-size: 0.9rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+      animation: fade-in-out 2s ease-in-out infinite;
+    }
+    
+    @keyframes fade-in-out {
+      0%, 100% { opacity: 0.6; }
+      50% { opacity: 1; }
+    }
+    
+    /* Progress Bar */
+    .progress-container {
+      width: 200px;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 1rem;
+    }
+    
+    .progress-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent-cyan), var(--accent-purple));
+      animation: progress-load 2s ease-in-out infinite;
+      border-radius: 2px;
+    }
+    
+    @keyframes progress-load {
+      0% { width: 0%; }
+      50% { width: 70%; }
+      100% { width: 100%; }
+    }
+    
+    /* Status Messages */
+    .status {
+      font-size: 0.75rem;
+      color: rgba(255, 255, 255, 0.6);
+      margin-top: 0.5rem;
+      min-height: 1rem;
+      transition: color 0.2s;
+    }
+    
+    /* Error State */
+    .error {
+      color: #ff003c;
+      animation: error-pulse 1s ease-in-out infinite;
+    }
+    
+    @keyframes error-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+  </style>
+</head>
+<body>
+  <div class="logo-container">
+    <div class="logo-glow"></div>
+    <img 
+      src="/app-icon.png" 
+      alt="HackT Logo" 
+      class="logo"
+      onerror="this.onerror=null; this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2240%22 fill=%22none%22 stroke=%22%2300f3ff%22 stroke-width=%222%22/><text x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%2300f3ff%22 font-size=%2212%22>H</text></svg>'; document.querySelector('.status').textContent='[ICON FALLBACK]'; document.querySelector('.status').classList.add('error');"
+    >
+  </div>
+  
+  <div class="loading-text">Initializing Sovereign Core</div>
+  
+  <div class="progress-container">
+    <div class="progress-bar"></div>
+  </div>
+  
+  <div class="status" id="status-text">Loading neural engines...</div>
+
+  <script>
+    // --------------------------------------------------------------
+    // 1. TAURI DEEP LINK EVENT HANDLER (oauth_callback)
+    // --------------------------------------------------------------
+    (function setupTauriEvents() {
+      // Safely check if Tauri is available (only in production or dev with Tauri)
+      const isTauri = !!window.__TAURI__;
+      
+      if (isTauri) {
+        console.log('[Splash] Tauri runtime detected. Setting up deep link listeners.');
+        
+        // Listen for OAuth callback events (e.g., from system deep link)
+        window.__TAURI__.event.listen('oauth_callback', (event) => {
+          console.log('[Splash] OAuth callback received:', event.payload);
+          // Update status to inform user
+          const statusDiv = document.getElementById('status-text');
+          if (statusDiv) {
+            statusDiv.textContent = 'Authentication received. Finalizing...';
+            statusDiv.style.color = '#00f3ff';
+          }
+          // Optionally store the payload in sessionStorage for React to consume later
+          if (event.payload && typeof event.payload === 'object') {
+            sessionStorage.setItem('tauri_oauth_payload', JSON.stringify(event.payload));
+          }
+          // Dispatch a custom DOM event so the React app can react after mount
+          window.dispatchEvent(new CustomEvent('tauri-oauth-callback', { detail: event.payload }));
+        });
+
+        // Optional: Listen for any other system events you may need
+        window.__TAURI__.event.listen('scheme-request', (event) => {
+          console.log('[Splash] Scheme request:', event.payload);
+        });
+      } else {
+        console.log('[Splash] Tauri not available (likely in browser dev mode). Deep link events will be ignored.');
+      }
+    })();
+
+    // --------------------------------------------------------------
+    // 2. SPLASH AUTO-HIDE ON APP READY
+    // --------------------------------------------------------------
+    // Wait for the custom event dispatched by React/App.tsx when the app is fully loaded
+    document.addEventListener('tauri-app-loaded', () => {
+      // Smooth fade out
+      document.body.style.transition = 'opacity 0.3s ease-out';
+      document.body.style.opacity = '0';
+      setTimeout(() => {
+        // Hide completely after fade
+        document.body.style.display = 'none';
+      }, 300);
+    });
+
+    // Fallback: auto-hide after 10 seconds if event never fires
+    setTimeout(() => {
+      if (document.body.style.display !== 'none') {
+        console.warn('[Splash] Fallback timeout triggered – forcing hide.');
+        document.body.style.transition = 'opacity 0.3s ease-out';
+        document.body.style.opacity = '0';
+        setTimeout(() => {
+          document.body.style.display = 'none';
+        }, 300);
+      }
+    }, 10000);
+
+    // --------------------------------------------------------------
+    // 3. SIMULATED LOADING STAGES (visual only)
+    // --------------------------------------------------------------
+    const statusText = document.getElementById('status-text');
+    const stages = [
+      'Loading neural engines...',
+      'Initializing VRAM guard...',
+      'Mounting knowledge vault...',
+      'Establishing WebSocket bridge...',
+      'Sovereign Core online.'
+    ];
+    
+    let stage = 0;
+    const interval = setInterval(() => {
+      if (stage < stages.length) {
+        if (statusText) statusText.textContent = stages[stage];
+        stage++;
+      } else {
+        clearInterval(interval);
+      }
+    }, 1500);
+  </script>
+</body>
+</html>
